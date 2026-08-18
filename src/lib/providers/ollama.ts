@@ -39,6 +39,59 @@ async function fetchOllamaTags(baseUrl: string): Promise<TagsResult> {
   }
 }
 
+/** Agent.model is a free-text label like "ollama/hermes3:8b" — strip the prefix to get the Ollama tag. */
+export function resolveOllamaModelTag(model: string): string {
+  return model.replace(/^ollama\//, "").trim();
+}
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Streams text deltas from a real Ollama chat completion (this performs
+ * inference, unlike everything else in this file). Throws if the request
+ * can't be started or Ollama reports an error; partial output already
+ * yielded before a mid-stream failure is the caller's to keep or discard.
+ */
+export async function* streamOllamaChat(model: string, messages: ChatMessage[]): AsyncGenerator<string> {
+  const baseUrl = getOllamaBaseUrl();
+  const res = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: resolveOllamaModelTag(model), messages, stream: true }),
+  });
+
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Ollama chat request failed (${res.status}): ${text || res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let obj: { message?: { content?: string }; error?: string };
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (obj.error) throw new Error(obj.error);
+      if (obj.message?.content) yield obj.message.content;
+    }
+  }
+}
+
 /**
  * Covers both "the Hermes agent" and "local AI models" generally — Ollama is
  * the runner for both on this machine. Passive reachability probe only; does

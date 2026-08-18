@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Agent, Goal, GoalDomain, GoalPriority, GoalStatus } from "@/lib/types";
@@ -116,8 +117,8 @@ export function GoalsBoard() {
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Goals</h1>
         <p className="text-sm text-muted-foreground">
-          What agents are working toward, grouped by the three things this dashboard tracks. Assign
-          agents from the registry below — nothing here executes on its own yet.
+          What agents are working toward, grouped by the three things this dashboard tracks. Assign an
+          agent, then dispatch the goal to it from the Runs page.
         </p>
       </div>
 
@@ -216,8 +217,18 @@ export function GoalsBoard() {
                     </div>
 
                     <div className="mt-1 border-t border-[var(--border)] pt-2">
-                      <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
-                        Assigned agents
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
+                          Assigned agents
+                        </span>
+                        {goal.agentIds.length > 0 && (
+                          <Link
+                            href={`/runs?goalId=${goal.id}&agentId=${goal.agentIds[0]}`}
+                            className="font-mono text-[10px] uppercase tracking-widest text-[var(--primary)] hover:underline"
+                          >
+                            Dispatch →
+                          </Link>
+                        )}
                       </div>
                       {agents.length === 0 ? (
                         <p className="text-[11px] text-muted-foreground/60">

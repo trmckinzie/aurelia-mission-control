@@ -106,3 +106,18 @@
     @apply font-sans;
   }
 }
+
+/* Live-generation cursor for streaming run output (DispatchPanel). */
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.cursor-blink {
+  animation: cursor-blink 1s step-start infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor-blink {
+    animation: none;
+  }
+}

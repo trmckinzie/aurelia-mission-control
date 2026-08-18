@@ -84,8 +84,8 @@ export function AgentRegistry() {
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Agent Registry</h1>
         <p className="text-sm text-muted-foreground">
-          Agents defined here don&apos;t run anything yet — this is the roster the Hermes gateway will
-          dispatch to once it&apos;s wired up. Nothing on this page calls a model.
+          Define an agent here, assign it to a goal, then dispatch it from the Runs page —
+          Ollama-backed agents (<code className="font-mono">ollama/&lt;model&gt;</code>) actually run.
         </p>
       </div>
 

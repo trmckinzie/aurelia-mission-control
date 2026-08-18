@@ -27,3 +27,23 @@ export interface Goal {
   createdAt: string;
   updatedAt: string;
 }
+
+export type RunStatus = "running" | "complete" | "error";
+
+/** A real dispatch of one Agent against one Goal to a model. Agent/goal name are
+ * snapshotted at dispatch time so history still reads sensibly if either is
+ * later renamed or deleted. */
+export interface Run {
+  id: string;
+  agentId: string;
+  agentName: string;
+  goalId: string;
+  goalTitle: string;
+  model: string;
+  status: RunStatus;
+  prompt: string;
+  response: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
