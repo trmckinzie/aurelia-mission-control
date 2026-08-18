@@ -1,36 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { HermesStatus } from "@/lib/types";
+import type { ProviderStatus, ProviderStatusResult } from "@/lib/providers/types";
 
-const LABEL: Record<HermesStatus, string> = {
+const LABEL: Record<ProviderStatus, string> = {
   unknown: "Checking Hermes Gateway…",
   unreachable: "Hermes Gateway: Ollama Not Detected",
-  "reachable-no-hermes": "Hermes Gateway: No Hermes Model Pulled",
+  degraded: "Hermes Gateway: ",
   ready: "Hermes Gateway Connected",
 };
 
-const DOT_CLASS: Record<HermesStatus, string> = {
+const DOT_CLASS: Record<ProviderStatus, string> = {
   unknown: "bg-muted-foreground",
   unreachable: "bg-muted-foreground",
-  "reachable-no-hermes": "bg-[var(--hud-warning)]",
+  degraded: "bg-[var(--hud-warning)]",
   ready: "bg-[var(--hud-positive)]",
 };
 
 const POLL_MS = 10000;
 
 export function HermesStatusIndicator() {
-  const [status, setStatus] = useState<HermesStatus>("unknown");
+  const [status, setStatus] = useState<ProviderStatus>("unknown");
+  const [detail, setDetail] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     async function tick() {
       try {
-        const res = await fetch("/api/hermes/status", { cache: "no-store" });
+        const res = await fetch("/api/providers", { cache: "no-store" });
         if (!res.ok) throw new Error("request failed");
-        const data: { status: HermesStatus } = await res.json();
-        if (!cancelled) setStatus(data.status);
+        const data: { providers: ProviderStatusResult[] } = await res.json();
+        const ollama = data.providers.find((p) => p.id === "ollama");
+        if (!cancelled && ollama) {
+          setStatus(ollama.status);
+          setDetail(ollama.detail);
+        }
       } catch {
         if (!cancelled) setStatus("unreachable");
       }
@@ -47,7 +52,7 @@ export function HermesStatusIndicator() {
   return (
     <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
       <span className={`size-1.5 rounded-full ${DOT_CLASS[status]}`} />
-      {LABEL[status]}
+      {status === "degraded" ? `${LABEL.degraded}${detail}` : LABEL[status]}
     </div>
   );
 }

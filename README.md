@@ -20,11 +20,11 @@ now:
   `/api/sessions` routes. Read-only, scoped to this project's own sessions
   only (derived from the server's own `process.cwd()`, never a client
   value), gated to loopback requests only.
-- **Hermes Gateway status** (top-right of the header) is a real, passive
-  probe against a local Ollama instance (`127.0.0.1:11434/api/tags`),
-  reporting whether Ollama is reachable and whether a Hermes model has been
-  pulled. It does not perform inference or orchestration — see
-  `/api/hermes/status`.
+- **AI Providers** (header dot + sidebar panel) are real, passive
+  availability probes — Ollama (`127.0.0.1:11434/api/tags`, covering both
+  Hermes and local models generally) and the Claude Code CLI (`claude
+  --version`). Neither performs inference; see `/api/providers` and
+  [Architecture](#architecture) below for how to add another backend.
 - **Agent Registry** (`/agents`) is real local data with read/write API
   routes — define agents (name, role, intended model), see them listed,
   toggle status by hand. Agents don't run anything yet; this is the roster
@@ -66,6 +66,7 @@ actually be dispatched to.
 
 ```bash
 npm install
+cp .env.local.example .env.local   # optional — defaults work if you haven't changed ports
 npm run dev
 ```
 
@@ -75,30 +76,89 @@ Other scripts:
 
 ```bash
 npm run lint    # ESLint
+npm test        # node:test, via tsx — see Testing below
 npm run build   # Production build (also type-checks)
 npm run start   # Serve a production build
 ```
+
+## Architecture
+
+**Providers.** Every AI backend this dashboard can see — Ollama (Hermes /
+local models) and the Claude Code CLI today — is a `ProviderCheck` in
+[`src/lib/providers/`](src/lib/providers): an `id`, a `label`, and an async
+`check()` returning a status (`unreachable` / `degraded` / `ready`) and a
+human-readable detail string. `registry.ts` runs every registered check in
+parallel behind `GET /api/providers`. To add another backend (another local
+model server, a hosted API, whatever comes next), write one file matching
+that shape and add it to the `PROVIDERS` array — nothing else needs to
+change, including the UI, which already renders whatever the registry
+returns. Config is env-var-driven (`OLLAMA_BASE_URL`, `CLAUDE_CODE_BIN` — see
+[`.env.local.example`](.env.local.example)), not hardcoded, so it survives
+port changes or a differently-named binary without a code edit.
+
+**API routes.** Every route lives under `src/app/api/` and is wrapped in
+[`withLocalGuard`](src/lib/api-helpers.ts), which rejects anything that
+didn't arrive on a loopback `Host` header before the handler runs — a new
+route gets this by construction, not by remembering to copy a check.
+`parseJsonBody`/`jsonError` cover the rest of the repeated boilerplate
+(body parsing, consistent error shape). Mutating routes (agents, goals) go
+through [`mutateCollection`](src/lib/store.ts) rather than reading and
+writing a JSON file directly — see Testing below for why that matters.
+
+**Data.** Agents and Goals persist to `.aurelia/data/*.json` (gitignored —
+local runtime state, not source) via `src/lib/store.ts`, which serializes
+all reads/writes per collection so concurrent requests can't corrupt the
+file or silently drop an update. This isn't a hypothetical concern: an
+earlier version of this store used `Date.now()` for temp filenames and no
+serialization, and concurrent PATCHes actually corrupted `goals.json`
+during testing. `mutateCollection()` fixes it and has a regression test.
+
+## Testing
+
+```bash
+npm test
+```
+
+Runs on Node's built-in test runner (`node:test`) via `tsx` for TypeScript
++ path-alias support — no test framework dependency. Test files are
+co-located as `*.test.ts` next to what they cover; Node discovers them
+recursively on its own, so **don't** pass an explicit glob like
+`src/**/*.test.ts` to the test script — plain POSIX `sh`/`bash` (what CI and
+`npm` scripts actually run under) doesn't expand `**` recursively without
+`globstar`, so a glob argument silently drops tests in nested directories.
+Verified this by running the suite in a clean `node:22` Linux container and
+watching a nested test file disappear before switching to no-argument
+discovery.
+
+Coverage is deliberately aimed at logic that's actually bitten this
+project — `store.ts`'s concurrency (10 truly parallel writes, checked for
+data loss and corruption) and `http-guard.ts`'s Host-header parsing (which
+had its own bug: naive `split(":")` breaks on bracketed IPv6 literals like
+`[::1]:3000`, caught by writing the test).
 
 ## Project layout
 
 ```
 src/
-  app/                     App Router entry (layout, error/not-found)
-  app/page.tsx             Overview route (chat + context canvas)
-  app/agents/               Agent Registry route
-  app/goals/                 Goals board route
-  app/api/sessions/         Read-only Claude Code session data (this project only)
-  app/api/agents/            Agent Registry CRUD (local JSON, read/write)
-  app/api/goals/              Goals CRUD (local JSON, read/write)
-  app/api/hermes/status/     Real Ollama/Hermes reachability probe
-  components/dashboard/    AURELIA-specific panels (nav, telemetry, logs, agents, goals, canvas)
-  components/ui/           shadcn/Base UI primitives
-  lib/claude-sessions.ts   Reads/tails this project's local session transcripts
-  lib/store.ts             Concurrency-safe local JSON-file persistence (.aurelia/data/)
-  lib/http-guard.ts        Loopback-only request check for the API routes
-  lib/types.ts             Agent / Goal / Hermes-status domain types
-  lib/mock-data.ts         Remaining mock data — swap for real gateway calls later
-  lib/utils.ts             `cn()` class-merging helper
+  app/                       App Router entry (layout, error/not-found)
+  app/page.tsx               Overview route (chat + context canvas)
+  app/agents/                 Agent Registry route
+  app/goals/                   Goals board route
+  app/api/sessions/           Read-only Claude Code session data (this project only)
+  app/api/agents/              Agent Registry CRUD (local JSON, read/write)
+  app/api/goals/                Goals CRUD (local JSON, read/write)
+  app/api/providers/            Provider status aggregation (see Architecture)
+  components/dashboard/      AURELIA-specific panels (nav, telemetry, logs, agents, goals, canvas)
+  components/ui/             shadcn/Base UI primitives
+  lib/providers/              Provider abstraction — one file per backend + registry
+  lib/claude-sessions.ts     Reads/tails this project's local session transcripts
+  lib/store.ts               Concurrency-safe local JSON-file persistence (.aurelia/data/)
+  lib/api-helpers.ts         Shared route wrapper (localhost guard) + body parsing
+  lib/http-guard.ts          Loopback-only request check
+  lib/types.ts               Agent / Goal domain types
+  lib/mock-data.ts           Remaining mock data — swap for real gateway calls later
+  lib/utils.ts               `cn()` class-merging helper
+  **/*.test.ts               Co-located tests — see Testing above
 ```
 
 ## Security notes
@@ -109,14 +169,16 @@ src/
   as a local/LAN tool over plain HTTP, and pinning HSTS on a `localhost`
   origin can lock a browser out of it for months.
 - `npm run dev` / `npm run start` bind to `127.0.0.1` explicitly (Next.js
-  defaults to `0.0.0.0`, i.e. reachable from anyone on the LAN). The
-  `/api/sessions*` routes also check the `Host` header and reject anything
-  that isn't `localhost`/`127.0.0.1` — belt-and-suspenders, since the network
-  binding is the layer that actually keeps other machines out; a Host header
-  can in principle be forged by a client on the same machine.
-- Session ids from the URL are validated against a strict pattern before
-  touching the filesystem, so there's no path-traversal surface in the
-  session-events route.
+  defaults to `0.0.0.0`, i.e. reachable from anyone on the LAN). Every API
+  route is also wrapped in `withLocalGuard` (see Architecture), which checks
+  the `Host` header and rejects anything that isn't `localhost`/`127.0.0.1`
+  — belt-and-suspenders, since the network binding is the layer that
+  actually keeps other machines out; a Host header can in principle be
+  forged by a client on the same machine. Both the guard and the IPv6
+  Host-header parsing it depends on have test coverage.
+- Session/agent/goal ids from the URL are validated against a strict pattern
+  before touching the filesystem or the data store, so there's no
+  path-traversal surface in any `[id]` route.
 - Once this talks to a real gateway, revisit the CSP's `connect-src` (to allow
   the gateway's origin) and consider auth for the dashboard itself, since
   nothing here is authenticated yet.

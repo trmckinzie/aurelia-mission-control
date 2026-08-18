@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { mutateCollection, readCollection } from "@/lib/store";
-import { isLocalhostRequest } from "@/lib/http-guard";
+import { jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import type { Goal, GoalDomain, GoalPriority } from "@/lib/types";
 
 const COLLECTION = "goals";
@@ -12,34 +12,24 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
-export async function GET(request: NextRequest) {
-  if (!isLocalhostRequest(request)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
+export const GET = withLocalGuard(async () => {
   const goals = await readCollection<Goal>(COLLECTION);
   return NextResponse.json({ goals });
-}
+});
 
-export async function POST(request: NextRequest) {
-  if (!isLocalhostRequest(request)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+export const POST = withLocalGuard(async (request) => {
+  const body = await parseJsonBody(request);
+  if (!body) {
+    return jsonError("Invalid JSON body", 400);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const { title, description, domain, priority } = (body ?? {}) as Record<string, unknown>;
+  const { title, description, domain, priority } = body;
 
   if (!isNonEmptyString(title)) {
-    return NextResponse.json({ error: "title is a required string" }, { status: 400 });
+    return jsonError("title is a required string", 400);
   }
   if (typeof domain !== "string" || !VALID_DOMAINS.includes(domain as GoalDomain)) {
-    return NextResponse.json({ error: `domain must be one of ${VALID_DOMAINS.join(", ")}` }, { status: 400 });
+    return jsonError(`domain must be one of ${VALID_DOMAINS.join(", ")}`, 400);
   }
   const resolvedPriority: GoalPriority =
     typeof priority === "string" && VALID_PRIORITIES.includes(priority as GoalPriority)
@@ -62,4 +52,4 @@ export async function POST(request: NextRequest) {
   await mutateCollection<Goal>(COLLECTION, (goals) => [...goals, goal]);
 
   return NextResponse.json({ goal }, { status: 201 });
-}
+});

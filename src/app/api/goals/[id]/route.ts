@@ -1,6 +1,6 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { mutateCollection } from "@/lib/store";
-import { isLocalhostRequest } from "@/lib/http-guard";
+import { jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import type { Goal, GoalPriority, GoalStatus } from "@/lib/types";
 
 const COLLECTION = "goals";
@@ -8,50 +8,43 @@ const VALID_STATUSES: GoalStatus[] = ["not-started", "in-progress", "blocked", "
 const VALID_PRIORITIES: GoalPriority[] = ["low", "medium", "high"];
 const ID_PATTERN = /^[a-zA-Z0-9-]{1,128}$/;
 
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isLocalhostRequest(request)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
+export const PATCH = withLocalGuard<{ params: Promise<{ id: string }> }>(async (request, { params }) => {
   const { id } = await params;
   if (!ID_PATTERN.test(id)) {
-    return NextResponse.json({ error: "Invalid goal id" }, { status: 400 });
+    return jsonError("Invalid goal id", 400);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = await parseJsonBody(request);
+  if (!body) {
+    return jsonError("Invalid JSON body", 400);
   }
 
-  const { status, priority, agentIds } = (body ?? {}) as Record<string, unknown>;
-
+  const { status, priority, agentIds } = body;
   const patch: Partial<Pick<Goal, "status" | "priority" | "agentIds">> = {};
 
   if (status !== undefined) {
     if (typeof status !== "string" || !VALID_STATUSES.includes(status as GoalStatus)) {
-      return NextResponse.json({ error: `status must be one of ${VALID_STATUSES.join(", ")}` }, { status: 400 });
+      return jsonError(`status must be one of ${VALID_STATUSES.join(", ")}`, 400);
     }
     patch.status = status as GoalStatus;
   }
 
   if (priority !== undefined) {
     if (typeof priority !== "string" || !VALID_PRIORITIES.includes(priority as GoalPriority)) {
-      return NextResponse.json({ error: `priority must be one of ${VALID_PRIORITIES.join(", ")}` }, { status: 400 });
+      return jsonError(`priority must be one of ${VALID_PRIORITIES.join(", ")}`, 400);
     }
     patch.priority = priority as GoalPriority;
   }
 
   if (agentIds !== undefined) {
     if (!Array.isArray(agentIds) || !agentIds.every((a) => typeof a === "string" && ID_PATTERN.test(a))) {
-      return NextResponse.json({ error: "agentIds must be an array of valid agent ids" }, { status: 400 });
+      return jsonError("agentIds must be an array of valid agent ids", 400);
     }
     patch.agentIds = agentIds;
   }
 
   if (Object.keys(patch).length === 0) {
-    return NextResponse.json({ error: "Provide at least one of: status, priority, agentIds" }, { status: 400 });
+    return jsonError("Provide at least one of: status, priority, agentIds", 400);
   }
 
   let updated: Goal | undefined;
@@ -65,8 +58,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   });
 
   if (!updated) {
-    return NextResponse.json({ error: "Goal not found" }, { status: 404 });
+    return jsonError("Goal not found", 404);
   }
 
   return NextResponse.json({ goal: updated });
-}
+});

@@ -27,13 +27,3 @@ export interface Goal {
   createdAt: string;
   updatedAt: string;
 }
-
-export type HermesStatus = "unknown" | "unreachable" | "reachable-no-hermes" | "ready";
-
-export interface HermesStatusResult {
-  status: HermesStatus;
-  ollamaUrl: string;
-  models: string[];
-  hermesModels: string[];
-  checkedAt: string;
-}

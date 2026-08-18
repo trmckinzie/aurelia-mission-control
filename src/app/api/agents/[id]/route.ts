@@ -1,32 +1,26 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { mutateCollection } from "@/lib/store";
-import { isLocalhostRequest } from "@/lib/http-guard";
+import { jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import type { Agent, AgentStatus } from "@/lib/types";
 
 const COLLECTION = "agents";
 const VALID_STATUSES: AgentStatus[] = ["defined", "idle", "active", "paused", "error"];
 const ID_PATTERN = /^[a-zA-Z0-9-]{1,128}$/;
 
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isLocalhostRequest(request)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
+export const PATCH = withLocalGuard<{ params: Promise<{ id: string }> }>(async (request, { params }) => {
   const { id } = await params;
   if (!ID_PATTERN.test(id)) {
-    return NextResponse.json({ error: "Invalid agent id" }, { status: 400 });
+    return jsonError("Invalid agent id", 400);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = await parseJsonBody(request);
+  if (!body) {
+    return jsonError("Invalid JSON body", 400);
   }
 
-  const { status } = (body ?? {}) as Record<string, unknown>;
+  const { status } = body;
   if (typeof status !== "string" || !VALID_STATUSES.includes(status as AgentStatus)) {
-    return NextResponse.json({ error: `status must be one of ${VALID_STATUSES.join(", ")}` }, { status: 400 });
+    return jsonError(`status must be one of ${VALID_STATUSES.join(", ")}`, 400);
   }
 
   let updated: Agent | undefined;
@@ -40,8 +34,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   });
 
   if (!updated) {
-    return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    return jsonError("Agent not found", 404);
   }
 
   return NextResponse.json({ agent: updated });
-}
+});

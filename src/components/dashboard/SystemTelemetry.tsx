@@ -2,6 +2,7 @@ import { Activity } from "lucide-react";
 import { TokenBudgetCard } from "@/components/dashboard/TokenBudgetCard";
 import { TerminalLog } from "@/components/dashboard/TerminalLog";
 import { ActiveSessions } from "@/components/dashboard/ActiveSessions";
+import { ProvidersPanel } from "@/components/dashboard/ProvidersPanel";
 import { PING_MS, TOKEN_BUDGET } from "@/lib/mock-data";
 
 export function SystemTelemetry() {
@@ -21,6 +22,13 @@ export function SystemTelemetry() {
       </div>
 
       <TokenBudgetCard {...TOKEN_BUDGET} />
+
+      <div>
+        <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground mb-2">
+          AI Providers
+        </h2>
+        <ProvidersPanel />
+      </div>
 
       <div>
         <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground mb-2">
