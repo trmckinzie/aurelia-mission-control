@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
 import { mutateCollection } from "@/lib/store";
-import { jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
+import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import type { Agent, AgentStatus } from "@/lib/types";
 
 const COLLECTION = "agents";
 const VALID_STATUSES: AgentStatus[] = ["defined", "idle", "active", "paused", "error"];
-const ID_PATTERN = /^[a-zA-Z0-9-]{1,128}$/;
 
 export const PATCH = withLocalGuard<{ params: Promise<{ id: string }> }>(async (request, { params }) => {
   const { id } = await params;
-  if (!ID_PATTERN.test(id)) {
+  if (!isValidId(id)) {
     return jsonError("Invalid agent id", 400);
   }
 

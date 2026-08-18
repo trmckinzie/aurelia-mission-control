@@ -44,6 +44,7 @@ export interface Run {
   prompt: string;
   response: string;
   error?: string;
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
 }

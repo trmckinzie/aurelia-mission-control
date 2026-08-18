@@ -31,3 +31,10 @@ export async function parseJsonBody(request: NextRequest): Promise<Record<string
 export function jsonError(message: string, status: number): NextResponse {
   return NextResponse.json({ error: message }, { status });
 }
+
+const ID_PATTERN = /^[a-zA-Z0-9-]{1,128}$/;
+
+/** Validates an id (from a URL param or a request body) before it touches the filesystem or store. */
+export function isValidId(value: unknown): value is string {
+  return typeof value === "string" && ID_PATTERN.test(value);
+}

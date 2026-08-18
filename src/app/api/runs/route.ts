@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { mutateCollection, readCollection } from "@/lib/store";
-import { jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
+import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import { streamOllamaChat } from "@/lib/providers/ollama";
 import { buildRunPrompt } from "@/lib/runs";
 import type { Agent, Goal, Run } from "@/lib/types";
 
 const COLLECTION = "runs";
-const ID_PATTERN = /^[a-zA-Z0-9-]{1,128}$/;
 
 export const GET = withLocalGuard(async () => {
   const runs = await readCollection<Run>(COLLECTION);
@@ -27,12 +26,8 @@ export const POST = withLocalGuard(async (request) => {
   if (!body) return jsonError("Invalid JSON body", 400);
 
   const { agentId, goalId } = body;
-  if (typeof agentId !== "string" || !ID_PATTERN.test(agentId)) {
-    return jsonError("agentId is required", 400);
-  }
-  if (typeof goalId !== "string" || !ID_PATTERN.test(goalId)) {
-    return jsonError("goalId is required", 400);
-  }
+  if (!isValidId(agentId)) return jsonError("agentId is required", 400);
+  if (!isValidId(goalId)) return jsonError("goalId is required", 400);
 
   const [agents, goals] = await Promise.all([readCollection<Agent>("agents"), readCollection<Goal>("goals")]);
   const agent = agents.find((a) => a.id === agentId);
@@ -54,6 +49,7 @@ export const POST = withLocalGuard(async (request) => {
     status: "running",
     prompt: user,
     response: "",
+    archived: false,
     createdAt: now,
     updatedAt: now,
   };

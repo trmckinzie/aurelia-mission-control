@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 import { mutateCollection } from "@/lib/store";
-import { jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
+import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import type { Goal, GoalPriority, GoalStatus } from "@/lib/types";
 
 const COLLECTION = "goals";
 const VALID_STATUSES: GoalStatus[] = ["not-started", "in-progress", "blocked", "done"];
 const VALID_PRIORITIES: GoalPriority[] = ["low", "medium", "high"];
-const ID_PATTERN = /^[a-zA-Z0-9-]{1,128}$/;
 
 export const PATCH = withLocalGuard<{ params: Promise<{ id: string }> }>(async (request, { params }) => {
   const { id } = await params;
-  if (!ID_PATTERN.test(id)) {
+  if (!isValidId(id)) {
     return jsonError("Invalid goal id", 400);
   }
 
@@ -37,7 +36,7 @@ export const PATCH = withLocalGuard<{ params: Promise<{ id: string }> }>(async (
   }
 
   if (agentIds !== undefined) {
-    if (!Array.isArray(agentIds) || !agentIds.every((a) => typeof a === "string" && ID_PATTERN.test(a))) {
+    if (!Array.isArray(agentIds) || !agentIds.every(isValidId)) {
       return jsonError("agentIds must be an array of valid agent ids", 400);
     }
     patch.agentIds = agentIds;

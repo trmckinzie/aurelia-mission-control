@@ -41,7 +41,10 @@ now:
   then gets persisted to run history. Not a demo: the first real dispatch —
   a "Circadian Coach" agent against a goal to optimize circadian rhythm for
   energy and nervous-system regulation, run on `hermes3:8b` — produced a
-  genuine, useful multi-section protocol in ~7 seconds. See `/api/runs` and
+  genuine, useful multi-section protocol in ~7 seconds. Run history has
+  Active/Archived tabs — archive a run to get it out of the way without
+  losing it, or delete one permanently (confirmed via a browser dialog
+  first, since it can't be undone). See `/api/runs` and
   [Architecture](#architecture).
 - Chat stream, token/spend budget, and the context canvas are still mock
   data in [`src/lib/mock-data.ts`](src/lib/mock-data.ts).
@@ -137,6 +140,16 @@ agent's `model` prefix (e.g. dispatching a `claude-code/...` agent through
 the Claude Code CLI instead) is the natural next extension and shouldn't
 require touching the route's shape, just the model-resolution step.
 
+**Run organization.** `PATCH /api/runs/[id]` flips a run's `archived` flag;
+`DELETE /api/runs/[id]` removes one permanently. Both reuse `mutateCollection`,
+so they're subject to the same concurrency guarantees as everything else in
+the store. The Active/Archived split happens client-side (`RunHistory`
+filters on `run.archived`) rather than as two separate endpoints — one list,
+one flag, less to keep in sync. Delete is irreversible, so the UI confirms
+via `window.confirm()` before calling it; a plain native dialog was a
+deliberate choice over a custom confirmation component for something this
+infrequent and this destructive — no new UI surface to get wrong.
+
 ## Testing
 
 ```bash
@@ -176,6 +189,7 @@ src/
   app/api/goals/                Goals CRUD (local JSON, read/write)
   app/api/providers/            Provider status aggregation (see Architecture)
   app/api/runs/                  Dispatch a real agent+goal to a model, streamed
+  app/api/runs/[id]/              Archive (PATCH) or permanently delete (DELETE) a run
   components/dashboard/      AURELIA-specific panels (nav, telemetry, logs, agents, goals, runs, canvas)
   components/dashboard/MarkdownContent.tsx  Shared markdown+code renderer (chat, run responses)
   components/ui/             shadcn/Base UI primitives
