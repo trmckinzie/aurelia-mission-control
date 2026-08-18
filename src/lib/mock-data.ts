@@ -14,42 +14,6 @@ export interface ChatMessage {
   trace?: string[];
 }
 
-export interface SubAgent {
-  id: string;
-  name: string;
-  status: "idle" | "running" | "error";
-}
-
-export const SUB_AGENTS: SubAgent[] = [
-  { id: "ollama-router", name: "Ollama Router", status: "idle" },
-  { id: "content-ingester", name: "Content Ingester", status: "running" },
-  { id: "script-drafter", name: "Script Drafter", status: "idle" },
-];
-
-export const INITIAL_LOG_EVENTS: LogEvent[] = [
-  { id: "l1", timestamp: "18:42:01", level: "info", source: "gateway", message: "hermes gateway run — dispatcher online" },
-  { id: "l2", timestamp: "18:42:01", level: "info", source: "dashboard", message: "listening on 0.0.0.0:9119 (auth: basic)" },
-  { id: "l3", timestamp: "18:42:03", level: "info", source: "ollama-router", message: "model llama3.1 warm, 12.0 GiB VRAM available" },
-  { id: "l4", timestamp: "18:42:04", level: "trace", source: "content-ingester", message: "watching workspace/research/ for new briefs" },
-];
-
-const LOG_POOL: Omit<LogEvent, "id" | "timestamp">[] = [
-  { level: "info", source: "script-drafter", message: "received research brief (4.2kb), queued for drafting" },
-  { level: "trace", source: "ollama-router", message: "routing completion → llama3.1 (local, $0.00)" },
-  { level: "info", source: "content-ingester", message: "arXiv scan complete: 8 hits, 2 relevant" },
-  { level: "warn", source: "gateway", message: "claude-sonnet-5 fallback skipped — Ollama handled request" },
-  { level: "trace", source: "script-drafter", message: "citation check: 6/6 claims traced to References" },
-  { level: "info", source: "dashboard", message: "session token refreshed" },
-  { level: "trace", source: "ollama-router", message: "context window: 4096 tokens, 812 used" },
-];
-
-export function nextMockLogEvent(): LogEvent {
-  const pick = LOG_POOL[Math.floor(Math.random() * LOG_POOL.length)];
-  const now = new Date();
-  const timestamp = now.toLocaleTimeString("en-US", { hour12: false });
-  return { id: `l-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`, timestamp, ...pick };
-}
-
 export const INITIAL_MESSAGES: ChatMessage[] = [
   {
     id: "m1",

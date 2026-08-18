@@ -1,14 +1,8 @@
 import { Activity } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { TokenBudgetCard } from "@/components/dashboard/TokenBudgetCard";
 import { TerminalLog } from "@/components/dashboard/TerminalLog";
-import { PING_MS, SUB_AGENTS, TOKEN_BUDGET, type SubAgent } from "@/lib/mock-data";
-
-const STATUS_STYLE: Record<SubAgent["status"], string> = {
-  idle: "border-[var(--border)] text-muted-foreground",
-  running: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
+import { ActiveSessions } from "@/components/dashboard/ActiveSessions";
+import { PING_MS, TOKEN_BUDGET } from "@/lib/mock-data";
 
 export function SystemTelemetry() {
   return (
@@ -30,21 +24,9 @@ export function SystemTelemetry() {
 
       <div>
         <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground mb-2">
-          Active Sub-Agents
+          Claude Code Sessions
         </h2>
-        <div className="flex flex-col gap-1.5">
-          {SUB_AGENTS.map((agent) => (
-            <div
-              key={agent.id}
-              className="flex items-center justify-between border border-[var(--border)] bg-card px-3 py-2"
-            >
-              <span className="font-mono text-[11px] text-foreground/90">{agent.name}</span>
-              <Badge variant="outline" className={STATUS_STYLE[agent.status]}>
-                {agent.status}
-              </Badge>
-            </div>
-          ))}
-        </div>
+        <ActiveSessions />
       </div>
 
       <div className="mt-auto">
