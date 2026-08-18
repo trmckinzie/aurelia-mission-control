@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { readCollection, writeCollection } from "@/lib/store";
+import { mutateCollection } from "@/lib/store";
 import { isLocalhostRequest } from "@/lib/http-guard";
 import type { Agent, AgentStatus } from "@/lib/types";
 
@@ -29,14 +29,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: `status must be one of ${VALID_STATUSES.join(", ")}` }, { status: 400 });
   }
 
-  const agents = await readCollection<Agent>(COLLECTION);
-  const index = agents.findIndex((a) => a.id === id);
-  if (index === -1) {
+  let updated: Agent | undefined;
+  await mutateCollection<Agent>(COLLECTION, (agents) => {
+    const index = agents.findIndex((a) => a.id === id);
+    if (index === -1) return agents;
+    updated = { ...agents[index], status: status as AgentStatus, updatedAt: new Date().toISOString() };
+    const next = [...agents];
+    next[index] = updated;
+    return next;
+  });
+
+  if (!updated) {
     return NextResponse.json({ error: "Agent not found" }, { status: 404 });
   }
 
-  agents[index] = { ...agents[index], status: status as AgentStatus, updatedAt: new Date().toISOString() };
-  await writeCollection(COLLECTION, agents);
-
-  return NextResponse.json({ agent: agents[index] });
+  return NextResponse.json({ agent: updated });
 }

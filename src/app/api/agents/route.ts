@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { readCollection, writeCollection } from "@/lib/store";
+import { mutateCollection, readCollection } from "@/lib/store";
 import { isLocalhostRequest } from "@/lib/http-guard";
 import type { Agent } from "@/lib/types";
 
@@ -43,14 +43,11 @@ export async function POST(request: NextRequest) {
     role: role.trim(),
     model: model.trim(),
     status: "defined",
-    goalIds: [],
     createdAt: now,
     updatedAt: now,
   };
 
-  const agents = await readCollection<Agent>(COLLECTION);
-  agents.push(agent);
-  await writeCollection(COLLECTION, agents);
+  await mutateCollection<Agent>(COLLECTION, (agents) => [...agents, agent]);
 
   return NextResponse.json({ agent }, { status: 201 });
 }
