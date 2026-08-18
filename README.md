@@ -1,15 +1,16 @@
 # AURELIA Mission Control
 
-A local-first dashboard UI for the "Hermes" agent gateway — a HUD-style
-command interface meant to sit in front of a locally-hosted AI agent system
-(chat stream, live event log, active sub-agents, token/spend budget, and a
-markdown "context canvas" showing whatever the agent is currently working
-on).
+A local-first "mission control" dashboard for AI-agent-driven work — personal
+productivity/telemetry, business processes, and content creation, run by
+agents that are meant to eventually communicate and make decisions toward
+your goals. The intended engine behind those agents is **Hermes**, [Nous
+Research](https://nousresearch.com)'s agentic model family, run locally
+(via [Ollama](https://ollama.com)) — not a fictional placeholder.
 
 ## Current state
 
-Two panels are wired to real data; the rest is still a **front-end UI shell**
-backed by static mock data in [`src/lib/mock-data.ts`](src/lib/mock-data.ts):
+Real, locally-sourced data is steadily replacing the original mock UI. As of
+now:
 
 - **Claude Code Sessions** (left sidebar) and **Session Event Log** (bottom
   left) read this project's actual Claude Code session transcripts —
@@ -17,11 +18,25 @@ backed by static mock data in [`src/lib/mock-data.ts`](src/lib/mock-data.ts):
   `~/.claude/projects/<sanitized-cwd>/`. See
   [`src/lib/claude-sessions.ts`](src/lib/claude-sessions.ts) and the
   `/api/sessions` routes. Read-only, scoped to this project's own sessions
-  only (derived from the server's own `process.cwd()`, never from a client
-  value), and gated to loopback requests only.
+  only (derived from the server's own `process.cwd()`, never a client
+  value), gated to loopback requests only.
+- **Hermes Gateway status** (top-right of the header) is a real, passive
+  probe against a local Ollama instance (`127.0.0.1:11434/api/tags`),
+  reporting whether Ollama is reachable and whether a Hermes model has been
+  pulled. It does not perform inference or orchestration — see
+  `/api/hermes/status`.
+- **Agent Registry** (`/agents`) is real local data with read/write API
+  routes — define agents (name, role, intended model), see them listed,
+  toggle status by hand. Agents don't run anything yet; this is the roster
+  Hermes will dispatch to once orchestration is wired up. Data persists to
+  `.aurelia/data/*.json` (gitignored — local runtime state, not source).
 - Chat stream, token/spend budget, and the context canvas are still mock
-  data — no "Hermes gateway" backend exists yet. The header's "Hermes
-  Gateway Connected" indicator is decorative for the same reason.
+  data in [`src/lib/mock-data.ts`](src/lib/mock-data.ts).
+
+Not built yet, in rough order: goals/business-process tracking, a content
+pipeline view, an agent decision/communication log, and — the actual
+orchestration wiring — a running Hermes-via-Ollama harness that agents
+defined in the registry can actually be dispatched to.
 
 ## Stack
 
@@ -56,12 +71,18 @@ npm run start   # Serve a production build
 
 ```
 src/
-  app/                     App Router entry (layout, page, error/not-found)
-  app/api/sessions/        Read-only Claude Code session data (this project only)
-  components/dashboard/    AURELIA-specific panels (chat, telemetry, logs, canvas)
+  app/                     App Router entry (layout, error/not-found)
+  app/page.tsx             Overview route (chat + context canvas)
+  app/agents/               Agent Registry route
+  app/api/sessions/         Read-only Claude Code session data (this project only)
+  app/api/agents/            Agent Registry CRUD (local JSON, read/write)
+  app/api/hermes/status/     Real Ollama/Hermes reachability probe
+  components/dashboard/    AURELIA-specific panels (nav, telemetry, logs, agents, canvas)
   components/ui/           shadcn/Base UI primitives
   lib/claude-sessions.ts   Reads/tails this project's local session transcripts
+  lib/store.ts             Atomic local JSON-file persistence (.aurelia/data/)
   lib/http-guard.ts        Loopback-only request check for the API routes
+  lib/types.ts             Agent / Hermes-status domain types
   lib/mock-data.ts         Remaining mock data — swap for real gateway calls later
   lib/utils.ts             `cn()` class-merging helper
 ```
