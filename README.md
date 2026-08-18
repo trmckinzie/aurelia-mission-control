@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AURELIA Mission Control
 
-## Getting Started
+A local-first dashboard UI for the "Hermes" agent gateway — a HUD-style
+command interface meant to sit in front of a locally-hosted AI agent system
+(chat stream, live event log, active sub-agents, token/spend budget, and a
+markdown "context canvas" showing whatever the agent is currently working
+on).
 
-First, run the development server:
+## Current state
+
+This is a **front-end UI shell**. Every screen renders from static mock data
+in [`src/lib/mock-data.ts`](src/lib/mock-data.ts) — there is no backend, no
+API route, no WebSocket/SSE connection, and no environment configuration yet.
+The "Gateway Log" panel simulates a live event stream client-side with
+`setInterval`; nothing is actually being read from a running gateway.
+
+Wiring this up to a real backend (the Hermes gateway itself) is the next
+milestone.
+
+## Stack
+
+- **Next.js 16** (App Router, Turbopack) — see `AGENTS.md`, this is a newer
+  major version with breaking changes from what most tooling/training data
+  assumes; check `node_modules/next/dist/docs/` before making framework-level
+  changes.
+- **React 19**
+- **Tailwind CSS v4** with [shadcn](https://ui.shadcn.com) components built
+  on [Base UI](https://base-ui.com) (not Radix)
+- `react-markdown` + `remark-gfm` for rendering the chat stream and context
+  canvas, `react-syntax-highlighter` for code blocks in chat
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Other scripts:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint    # ESLint
+npm run build   # Production build (also type-checks)
+npm run start   # Serve a production build
+```
 
-## Learn More
+## Project layout
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+  app/                  App Router entry (layout, page, error/not-found)
+  components/dashboard/ AURELIA-specific panels (chat, telemetry, logs, canvas)
+  components/ui/        shadcn/Base UI primitives
+  lib/mock-data.ts      All current data — swap for real gateway calls later
+  lib/utils.ts          `cn()` class-merging helper
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Security notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `next.config.ts` sets baseline security headers (CSP, `X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) via `headers()`.
+  Deliberately **not** set: `Strict-Transport-Security` — this is meant to run
+  as a local/LAN tool over plain HTTP, and pinning HSTS on a `localhost`
+  origin can lock a browser out of it for months.
+- Once this talks to a real gateway, revisit the CSP's `connect-src` (to allow
+  the gateway's origin) and consider auth for the dashboard itself, since
+  nothing here is authenticated yet.
