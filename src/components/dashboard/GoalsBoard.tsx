@@ -112,6 +112,20 @@ export function GoalsBoard() {
     patchGoal(goal.id, { agentIds: next });
   }
 
+  async function deleteGoal(goal: Goal) {
+    const confirmed = window.confirm(`Permanently delete "${goal.title}"? This can't be undone.`);
+    if (!confirmed) return;
+
+    setError(null);
+    try {
+      const res = await fetch(`/api/goals/${goal.id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) throw new Error("request failed");
+      await load();
+    } catch {
+      setError("Could not delete goal.");
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -184,15 +198,25 @@ export function GoalsBoard() {
                   <div key={goal.id} className="flex flex-col gap-2 border border-[var(--border)] bg-card p-3">
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-sm font-semibold text-foreground">{goal.title}</span>
-                      <button
-                        type="button"
-                        onClick={() => patchGoal(goal.id, { priority: NEXT_PRIORITY[goal.priority] })}
-                        title="Click to cycle priority"
-                      >
-                        <Badge variant="outline" className={PRIORITY_STYLE[goal.priority]}>
-                          {goal.priority}
-                        </Badge>
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => patchGoal(goal.id, { priority: NEXT_PRIORITY[goal.priority] })}
+                          title="Click to cycle priority"
+                        >
+                          <Badge variant="outline" className={PRIORITY_STYLE[goal.priority]}>
+                            {goal.priority}
+                          </Badge>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteGoal(goal)}
+                          title="Delete goal"
+                          className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground hover:text-[var(--hud-critical)]"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                     {goal.description && (
                       <p className="text-xs text-muted-foreground">{goal.description}</p>

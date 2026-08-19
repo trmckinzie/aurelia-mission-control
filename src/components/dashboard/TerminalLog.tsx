@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { LogEvent } from "@/lib/mock-data";
+import type { LogEvent } from "@/lib/types";
 
 const LEVEL_COLOR: Record<LogEvent["level"], string> = {
   info: "text-[var(--primary)]",

@@ -28,6 +28,14 @@ export interface Goal {
   updatedAt: string;
 }
 
+export interface LogEvent {
+  id: string;
+  timestamp: string;
+  level: "info" | "warn" | "error" | "trace";
+  source: string;
+  message: string;
+}
+
 export type RunStatus = "running" | "complete" | "error";
 
 /** A real dispatch of one Agent against one Goal to a model. Agent/goal name are

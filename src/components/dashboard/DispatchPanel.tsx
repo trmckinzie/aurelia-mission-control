@@ -140,6 +140,9 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
   }
 
   const displayStatus: RunStatus = status === "idle" ? "running" : status;
+  const selectedGoal = goals.find((g) => g.id === goalId);
+  const assignedAgents = selectedGoal ? agents.filter((a) => selectedGoal.agentIds.includes(a.id)) : [];
+  const otherAgents = selectedGoal ? agents.filter((a) => !selectedGoal.agentIds.includes(a.id)) : agents;
 
   return (
     <div className="flex flex-col gap-4">
@@ -171,11 +174,32 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
             <option value="" disabled>
               Select an agent…
             </option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
+            {assignedAgents.length > 0 ? (
+              <>
+                <optgroup label="Assigned to this goal">
+                  {assignedAgents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </optgroup>
+                {otherAgents.length > 0 && (
+                  <optgroup label="Other agents">
+                    {otherAgents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </>
+            ) : (
+              otherAgents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))
+            )}
           </select>
         </label>
         <Button onClick={dispatch} disabled={!agentId || !goalId || status === "running"}>

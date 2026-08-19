@@ -1,7 +1,7 @@
 import { open, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { LogEvent } from "@/lib/mock-data";
+import type { LogEvent } from "@/lib/types";
 
 export interface SessionSummary {
   id: string;

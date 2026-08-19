@@ -62,3 +62,23 @@ export const PATCH = withLocalGuard<{ params: Promise<{ id: string }> }>(async (
 
   return NextResponse.json({ goal: updated });
 });
+
+export const DELETE = withLocalGuard<{ params: Promise<{ id: string }> }>(async (_request, { params }) => {
+  const { id } = await params;
+  if (!isValidId(id)) {
+    return jsonError("Invalid goal id", 400);
+  }
+
+  let found = false;
+  await mutateCollection<Goal>(COLLECTION, (goals) => {
+    const next = goals.filter((g) => g.id !== id);
+    found = next.length !== goals.length;
+    return next;
+  });
+
+  if (!found) {
+    return jsonError("Goal not found", 404);
+  }
+
+  return new NextResponse(null, { status: 204 });
+});

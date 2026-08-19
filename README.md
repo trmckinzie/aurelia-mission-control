@@ -9,9 +9,14 @@ Research](https://nousresearch.com)'s agentic model family, run locally
 
 ## Current state
 
-Real, locally-sourced data is steadily replacing the original mock UI. As of
-now:
+Every page shows real, locally-sourced data — there is no mock UI left in
+this app. As of now:
 
+- **Overview** (`/`, [`src/components/dashboard/Overview.tsx`](src/components/dashboard/Overview.tsx))
+  is a real status dashboard, not a demo: goal/agent counts by status, the
+  5 most recent runs with live status badges, and quick links into each
+  page — with a first-run "getting started" pointer when there's no data
+  yet instead of empty cards.
 - **Claude Code Sessions** (left sidebar) and **Session Event Log** (bottom
   left) read this project's actual Claude Code session transcripts —
   Claude Code writes one append-only JSONL file per session under
@@ -19,39 +24,51 @@ now:
   [`src/lib/claude-sessions.ts`](src/lib/claude-sessions.ts) and the
   `/api/sessions` routes. Read-only, scoped to this project's own sessions
   only (derived from the server's own `process.cwd()`, never a client
-  value), gated to loopback requests only.
-- **AI Providers** (header dot + sidebar panel) are real, passive
-  availability probes — Ollama (`127.0.0.1:11434/api/tags`, covering both
-  Hermes and local models generally) and the Claude Code CLI (`claude
-  --version`). Neither performs inference; see `/api/providers` and
-  [Architecture](#architecture) below for how to add another backend.
-- **Agent Registry** (`/agents`) is real local data with read/write API
-  routes — define agents (name, role, intended model), see them listed,
-  toggle status by hand. Agents don't run anything yet; this is the roster
-  Hermes will dispatch to once orchestration is wired up.
+  value), gated to loopback requests only. This is this project's own build
+  conversations, not a dispatch target — that's the separate "Claude Code
+  CLI" entry under AI Providers below, and the sidebar says so explicitly
+  since the two easily get confused.
+- **AI Providers** (header + sidebar panel) are real, passive availability
+  probes — Ollama (`127.0.0.1:11434/api/tags`, covering both Hermes and
+  local models generally) and the Claude Code CLI (`claude --version`).
+  Neither performs inference; see `/api/providers` and
+  [Architecture](#architecture) below for how to add another backend. The
+  header shows both providers' status at a glance (not just Ollama), since
+  both are real dispatch backends now.
+- **Agent Registry** (`/agents`) is real local data with full read/write API
+  routes — define agents (name, role, model), rename/re-role/re-model an
+  existing one inline, delete one you no longer need, toggle status by
+  hand. Both `ollama/<model>` and `claude-code/<model>` agents actually run
+  when dispatched. Deleting an agent also strips it from any goal's
+  assignment list, so nothing is left pointing at a row that no longer
+  exists.
 - **Goals** (`/goals`) is a three-column board across the app's three domains
-  (personal productivity, business process, content creation). Create goals,
-  toggle status/priority, and assign agents from the registry — the goal is
-  the single source of truth for that relationship (`Goal.agentIds`), not
-  mirrored back onto `Agent` to avoid a dual-write bidirectional-relationship
-  bug.
+  (personal productivity, business process, content creation). Create,
+  delete, toggle status/priority, and assign agents from the registry — the
+  goal is the single source of truth for that relationship (`Goal.agentIds`),
+  not mirrored back onto `Agent` to avoid a dual-write
+  bidirectional-relationship bug. That assignment now actually matters at
+  dispatch time — see Runs below.
 - **Runs** (`/runs`) is real execution — the actual orchestration step. Pick
   an agent and a goal, hit Dispatch, and the agent streams a real response
-  back live, token by token, then gets persisted to run history. Two
-  dispatch paths exist, picked by the agent's model prefix: `ollama/<tag>`
-  goes to Ollama; `claude-code/<model>` shells out to the Claude Code CLI
-  headlessly (`claude -p ... --output-format stream-json`) with `--tools ""`
-  so it can't take any agentic action — it's a plain chat completion, not a
-  coding session against a goal description it didn't write. Not a demo:
-  the first real dispatch — a "Circadian Coach" agent against a goal to
-  optimize circadian rhythm for energy and nervous-system regulation, run
-  on `hermes3:8b` — produced a genuine, useful multi-section protocol in
-  ~7 seconds. Run history has Active/Archived tabs — archive a run to get
-  it out of the way without losing it, or delete one permanently (confirmed
-  via a browser dialog first, since it can't be undone). See `/api/runs`
-  and [Architecture](#architecture).
-- Chat stream, token/spend budget, and the context canvas are still mock
-  data in [`src/lib/mock-data.ts`](src/lib/mock-data.ts).
+  back live, token by token, then gets persisted to run history. When a
+  selected goal has assigned agents, the agent picker groups them under
+  "Assigned to this goal" ahead of everything else, so the assignment made
+  on the Goals page is actually visible here instead of a flat,
+  unrelated list. Two dispatch paths exist, picked by the agent's model
+  prefix: `ollama/<tag>` goes to Ollama; `claude-code/<model>` shells out to
+  the Claude Code CLI headlessly (`claude -p ... --output-format
+  stream-json`) with `--tools ""` so it can't take any agentic action — it's
+  a plain chat completion, not a coding session against a goal description
+  it didn't write. Not a demo: the first real dispatch — a "Circadian Coach"
+  agent against a goal to optimize circadian rhythm for energy and
+  nervous-system regulation, run on `hermes3:8b` — produced a genuine,
+  useful multi-section protocol in ~7 seconds. Run history has
+  Active/Archived tabs — archive a run to get it out of the way without
+  losing it, or delete one permanently (confirmed via a browser dialog
+  first, since it can't be undone). A run also shows up as a live-pulsing
+  dot on the Runs nav link while it's in flight, visible from any page. See
+  `/api/runs` and [Architecture](#architecture).
 
 Agents, Goals, and Runs all persist to `.aurelia/data/*.json` (gitignored —
 local runtime state, not source) via [`src/lib/store.ts`](src/lib/store.ts),
@@ -72,8 +89,8 @@ decision/communication log.
 - **React 19**
 - **Tailwind CSS v4** with [shadcn](https://ui.shadcn.com) components built
   on [Base UI](https://base-ui.com) (not Radix)
-- `react-markdown` + `remark-gfm` for rendering the chat stream and context
-  canvas, `react-syntax-highlighter` for code blocks in chat
+- `react-markdown` + `remark-gfm` for rendering run responses,
+  `react-syntax-highlighter` for code blocks within them
 
 ## Getting started
 
@@ -114,9 +131,14 @@ port changes or a differently-named binary without a code edit.
 didn't arrive on a loopback `Host` header before the handler runs — a new
 route gets this by construction, not by remembering to copy a check.
 `parseJsonBody`/`jsonError` cover the rest of the repeated boilerplate
-(body parsing, consistent error shape). Mutating routes (agents, goals) go
-through [`mutateCollection`](src/lib/store.ts) rather than reading and
-writing a JSON file directly — see Testing below for why that matters.
+(body parsing, consistent error shape). Mutating routes (agents, goals,
+runs) go through [`mutateCollection`](src/lib/store.ts) rather than reading
+and writing a JSON file directly — see Testing below for why that matters.
+`agents/[id]` and `goals/[id]` both support `PATCH` (partial update) and
+`DELETE` (permanent removal, 204) using the same pattern established by
+`runs/[id]`; deleting an agent additionally strips its id from every
+goal's `agentIds` in a second `mutateCollection("goals", ...)` call, so
+deletion can't leave a dangling reference on a goal it was assigned to.
 
 **Data.** Agents, Goals, and Runs persist to `.aurelia/data/*.json`
 (gitignored — local runtime state, not source) via `src/lib/store.ts`,
@@ -198,18 +220,21 @@ without a live model or a real CLI process.
 ```
 src/
   app/                       App Router entry (layout, error/not-found)
-  app/page.tsx               Overview route (chat + context canvas)
+  app/page.tsx               Overview route — real status dashboard
   app/agents/                 Agent Registry route
   app/goals/                   Goals board route
   app/runs/                     Dispatch + run history route
   app/api/sessions/           Read-only Claude Code session data (this project only)
   app/api/agents/              Agent Registry CRUD (local JSON, read/write)
+  app/api/agents/[id]/          Edit (PATCH) or permanently delete (DELETE) an agent
   app/api/goals/                Goals CRUD (local JSON, read/write)
+  app/api/goals/[id]/            Edit (PATCH) or permanently delete (DELETE) a goal
   app/api/providers/            Provider status aggregation (see Architecture)
   app/api/runs/                  Dispatch a real agent+goal to a model, streamed
   app/api/runs/[id]/              Archive (PATCH) or permanently delete (DELETE) a run
-  components/dashboard/      AURELIA-specific panels (nav, telemetry, logs, agents, goals, runs, canvas)
-  components/dashboard/MarkdownContent.tsx  Shared markdown+code renderer (chat, run responses)
+  components/dashboard/      AURELIA-specific panels (nav, telemetry, logs, agents, goals, runs)
+  components/dashboard/Overview.tsx  Home dashboard — real goal/agent/run summaries
+  components/dashboard/MarkdownContent.tsx  Shared markdown+code renderer (run responses)
   components/ui/             shadcn/Base UI primitives
   lib/providers/              Provider abstraction — one file per backend + registry
   lib/providers/ollama.ts     Ollama health check + streaming chat dispatch
@@ -219,8 +244,7 @@ src/
   lib/store.ts               Concurrency-safe local JSON-file persistence (.aurelia/data/)
   lib/api-helpers.ts         Shared route wrapper (localhost guard) + body parsing
   lib/http-guard.ts          Loopback-only request check
-  lib/types.ts               Agent / Goal / Run domain types
-  lib/mock-data.ts           Remaining mock data — swap for real gateway calls later
+  lib/types.ts               Agent / Goal / Run / LogEvent domain types
   lib/utils.ts               `cn()` class-merging helper
   **/*.test.ts               Co-located tests — see Testing above
 ```
