@@ -1,8 +1,27 @@
+import { streamClaudeCodeChat } from "@/lib/providers/claude-code";
+import { streamOllamaChat } from "@/lib/providers/ollama";
 import type { Agent, Goal } from "@/lib/types";
 
 export interface BuiltPrompt {
   system: string;
   user: string;
+}
+
+const CLAUDE_CODE_PREFIX = "claude-code/";
+
+/**
+ * Picks a provider by the agent's model prefix — the one thing that needs
+ * to change to add a new dispatch path. Shared by every route that
+ * dispatches an agent (POST /api/runs, the Fleet refine step).
+ */
+export function dispatchAgent(agent: Agent, system: string, user: string): AsyncGenerator<string> {
+  if (agent.model.startsWith(CLAUDE_CODE_PREFIX)) {
+    return streamClaudeCodeChat(agent.model, system, user);
+  }
+  return streamOllamaChat(agent.model, [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ]);
 }
 
 /**

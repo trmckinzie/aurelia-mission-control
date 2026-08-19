@@ -10,6 +10,7 @@ const LINKS: { href: string; label: string }[] = [
   { href: "/agents", label: "Agents" },
   { href: "/goals", label: "Goals" },
   { href: "/runs", label: "Runs" },
+  { href: "/fleet", label: "Fleet" },
 ];
 
 const POLL_MS = 5000;

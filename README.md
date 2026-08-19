@@ -69,15 +69,30 @@ this app. As of now:
   first, since it can't be undone). A run also shows up as a live-pulsing
   dot on the Runs nav link while it's in flight, visible from any page. See
   `/api/runs` and [Architecture](#architecture).
+- **Fleet** (`/fleet`) is the end-to-end pipeline: blurb a rough idea,
+  refine it with an orchestrator agent into a brief + task breakdown,
+  review and edit the proposed tasks, materialize them into real
+  Agents/Goals, then dispatch each and watch it complete on an org-chart
+  view — Project (root) → orchestrator → task nodes, each showing its
+  assigned agent and live status, linking straight into Runs to dispatch.
+  A "Copy deliverables" button bundles every completed task's output into
+  one paste-ready block. **Scope note:** this produces a finished,
+  copy-ready deliverable — it does not post anywhere. There's no YouTube
+  (or other platform) integration; publishing is something you do
+  yourself with the output. See `/api/projects` and
+  [Architecture](#architecture).
 
-Agents, Goals, and Runs all persist to `.aurelia/data/*.json` (gitignored —
-local runtime state, not source) via [`src/lib/store.ts`](src/lib/store.ts),
-which serializes all reads/writes per collection so concurrent API requests
-can't corrupt the file or silently drop an update (`mutateCollection`) —
-this was a real bug caught during testing (concurrent PATCHes
-truncated/duplicated the JSON), not a hypothetical one.
+Agents, Goals, Runs, and Projects all persist to `.aurelia/data/*.json`
+(gitignored — local runtime state, not source) via
+[`src/lib/store.ts`](src/lib/store.ts), which serializes all reads/writes
+per collection so concurrent API requests can't corrupt the file or
+silently drop an update (`mutateCollection`) — this was a real bug caught
+during testing (concurrent PATCHes truncated/duplicated the JSON), not a
+hypothetical one.
 
-Not built yet, in rough order: a content pipeline view and an agent
+Not built yet, in rough order: bulk/parallel task dispatch from Fleet
+("dispatch all"), a real diagrammed org chart (today's is a plain CSS
+tree, deliberately, to avoid a new dependency), and an agent
 decision/communication log.
 
 ## Stack
@@ -140,7 +155,7 @@ and writing a JSON file directly — see Testing below for why that matters.
 goal's `agentIds` in a second `mutateCollection("goals", ...)` call, so
 deletion can't leave a dangling reference on a goal it was assigned to.
 
-**Data.** Agents, Goals, and Runs persist to `.aurelia/data/*.json`
+**Data.** Agents, Goals, Runs, and Projects persist to `.aurelia/data/*.json`
 (gitignored — local runtime state, not source) via `src/lib/store.ts`,
 which serializes all reads/writes per collection so concurrent requests
 can't corrupt the file or silently drop an update. This isn't a
@@ -188,6 +203,41 @@ via `window.confirm()` before calling it; a plain native dialog was a
 deliberate choice over a custom confirmation component for something this
 infrequent and this destructive — no new UI surface to get wrong.
 
+**Fleet (brain dump → deliverables).** A `Project`
+([`src/lib/types.ts`](src/lib/types.ts)) holds a raw idea, an orchestrator
+`Agent` id, and — once refined — a brief, assumptions, and a proposed task
+list. The design principle here is maximal reuse: a materialized "task" is
+just a normal `Goal` (tagged with `projectId`), so once it exists,
+everything downstream — dispatch, streaming, run history, archive/delete —
+is code that already exists and is already tested. Nothing new was built
+for task execution; Fleet only adds the steps *before* a Goal exists.
+
+- `POST /api/projects/[id]/refine` dispatches the orchestrator agent
+  through the exact same `dispatchAgent` helper `/api/runs` uses (moved to
+  [`src/lib/runs.ts`](src/lib/runs.ts) so both routes share it), streaming
+  the raw response back the same way. [`buildRefinePrompt`](src/lib/projects.ts)
+  instructs the model to reply with a single JSON object (title, brief,
+  assumptions, tasks); [`parseRefinedPlan`](src/lib/projects.ts) parses it
+  — tolerant of a stray ` ```json ` fence, and it drops individually
+  malformed tasks rather than failing the whole plan. Real local models
+  don't always follow the schema perfectly (in testing, a small model
+  invented task "models" like `dall-e/2.0` that don't correspond to any
+  real provider) — that's exactly why the next step is a review, not an
+  auto-execute.
+- `POST /api/projects/[id]/plan` takes the (possibly user-edited) task
+  list and materializes it: an exact `Agent.model` match gets reused, a
+  new one gets created if not — same rationale as any other agent, so the
+  Agent Registry stays real, editable data with no hidden agents. Each
+  task becomes a `Goal` with `domain: "content"` and `projectId` set.
+- `DELETE /api/projects/[id]` cascade-deletes the Project's own Goals (same
+  reasoning as agent-delete's cascade cleanup) but leaves their Runs
+  standing — Runs already snapshot `goalTitle`/`agentName` for exactly
+  this reason.
+- The org chart itself does zero new data-fetching beyond what already
+  exists — it composes `GET /api/projects/[id]` with the existing
+  `GET /api/goals`/`GET /api/agents`/`GET /api/runs`, filtered client-side
+  by `projectId`, matching the scale this is meant to run at.
+
 ## Testing
 
 ```bash
@@ -213,7 +263,12 @@ its own bug: naive `split(":")` breaks on bracketed IPv6 literals like
 builder and the pure parsing/resolution helpers in each provider
 (`classifyOllamaModels`, `resolveClaudeCodeModelTag`, `extractStreamDelta`),
 since those are the pieces of the dispatch path that are practical to test
-without a live model or a real CLI process.
+without a live model or a real CLI process. Same idea for Fleet:
+`buildRefinePrompt`/`parseRefinedPlan` (`src/lib/projects.ts`) are tested
+against well-formed JSON, JSON wrapped in a code fence, non-JSON text, and
+a response with one malformed task mixed into otherwise-valid ones — the
+last case is what an imperfect real model response actually looks like,
+not a hypothetical.
 
 ## Project layout
 
@@ -224,6 +279,8 @@ src/
   app/agents/                 Agent Registry route
   app/goals/                   Goals board route
   app/runs/                     Dispatch + run history route
+  app/fleet/                     Fleet list + "new brain dump" route
+  app/fleet/[id]/                  Project detail / org chart route
   app/api/sessions/           Read-only Claude Code session data (this project only)
   app/api/agents/              Agent Registry CRUD (local JSON, read/write)
   app/api/agents/[id]/          Edit (PATCH) or permanently delete (DELETE) an agent
@@ -232,19 +289,26 @@ src/
   app/api/providers/            Provider status aggregation (see Architecture)
   app/api/runs/                  Dispatch a real agent+goal to a model, streamed
   app/api/runs/[id]/              Archive (PATCH) or permanently delete (DELETE) a run
-  components/dashboard/      AURELIA-specific panels (nav, telemetry, logs, agents, goals, runs)
+  app/api/projects/              Fleet Projects CRUD (local JSON, read/write)
+  app/api/projects/[id]/          Get (GET) or delete with cascade (DELETE) a project
+  app/api/projects/[id]/refine/     Dispatch the orchestrator, stream + parse the plan
+  app/api/projects/[id]/plan/        Materialize proposed tasks into Agents + Goals
+  components/dashboard/      AURELIA-specific panels (nav, telemetry, logs, agents, goals, runs, fleet)
   components/dashboard/Overview.tsx  Home dashboard — real goal/agent/run summaries
+  components/dashboard/FleetList.tsx    Project list + new-brain-dump form
+  components/dashboard/ProjectDetail.tsx  Refine/plan review + org chart + deliverables
   components/dashboard/MarkdownContent.tsx  Shared markdown+code renderer (run responses)
   components/ui/             shadcn/Base UI primitives
   lib/providers/              Provider abstraction — one file per backend + registry
   lib/providers/ollama.ts     Ollama health check + streaming chat dispatch
   lib/providers/claude-code.ts  Claude Code CLI health check + streaming dispatch (--tools "")
   lib/claude-sessions.ts     Reads/tails this project's local session transcripts
-  lib/runs.ts                 Pure prompt-building for dispatch (unit tested)
+  lib/runs.ts                 Pure prompt-building + shared dispatch-provider selection (unit tested)
+  lib/projects.ts             Pure refine-prompt building + plan parsing (unit tested)
   lib/store.ts               Concurrency-safe local JSON-file persistence (.aurelia/data/)
   lib/api-helpers.ts         Shared route wrapper (localhost guard) + body parsing
   lib/http-guard.ts          Loopback-only request check
-  lib/types.ts               Agent / Goal / Run / LogEvent domain types
+  lib/types.ts               Agent / Goal / Run / Project / LogEvent domain types
   lib/utils.ts               `cn()` class-merging helper
   **/*.test.ts               Co-located tests — see Testing above
 ```
@@ -273,6 +337,13 @@ src/
   beyond generating text. It's spawned via `spawn(bin, args)` (an argument
   array, not a shell string), so nothing in the goal/agent text can be
   interpreted as shell syntax.
+- Fleet's `POST /api/projects/[id]/refine` is just another consumer of the
+  same `dispatchAgent` path `POST /api/runs` uses — the orchestrator agent
+  gets no more (and no less) access than any other dispatched agent. It
+  proposes a plan as text; AURELIA's own backend is what actually creates
+  Agents/Goals from it, deterministically, only after `POST
+  /api/projects/[id]/plan` is called — the orchestrator itself never gets
+  live tool access to create anything.
 - `POST /api/runs` performs real inference and is the most expensive/
   consequential route in the app — same `withLocalGuard` + id-validation
   treatment as everything else, but worth knowing it's there: it's the one

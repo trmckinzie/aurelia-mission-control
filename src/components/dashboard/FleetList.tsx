@@ -1,0 +1,195 @@
+"use client";
+
+import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { Agent, Project, ProjectStatus } from "@/lib/types";
+
+const STATUS_STYLE: Record<ProjectStatus, string> = {
+  draft: "border-[var(--border)] text-muted-foreground",
+  refining: "border-[var(--hud-warning)] text-[var(--hud-warning)]",
+  refined: "border-[var(--primary)] text-[var(--primary)]",
+  planned: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
+  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
+};
+
+const CLAUDE_CODE_PREFIX = "claude-code/";
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+export function FleetList() {
+  const router = useRouter();
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [rawIdea, setRawIdea] = useState("");
+  const [orchestratorAgentId, setOrchestratorAgentId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function load() {
+    try {
+      const [projectsRes, agentsRes] = await Promise.all([
+        fetch("/api/projects", { cache: "no-store" }),
+        fetch("/api/agents", { cache: "no-store" }),
+      ]);
+      if (!projectsRes.ok || !agentsRes.ok) throw new Error("request failed");
+      const projectsData: { projects: Project[] } = await projectsRes.json();
+      const agentsData: { agents: Agent[] } = await agentsRes.json();
+      setProjects(projectsData.projects);
+      setAgents(agentsData.agents);
+    } catch {
+      setError("Could not load Fleet.");
+    }
+  }
+
+  useEffect(() => {
+    async function initialLoad() {
+      await load();
+    }
+    initialLoad();
+  }, []);
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    if (!rawIdea.trim() || !orchestratorAgentId) return;
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawIdea, orchestratorAgentId }),
+      });
+      if (!res.ok) throw new Error("request failed");
+      const data: { project: Project } = await res.json();
+      router.push(`/fleet/${data.project.id}`);
+    } catch {
+      setError("Could not start this brain dump.");
+      setSubmitting(false);
+    }
+  }
+
+  if (error) {
+    return <p className="text-sm text-[var(--hud-critical)]">{error}</p>;
+  }
+
+  if (projects === null || agents === null) {
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
+  }
+
+  const claudeAgents = agents.filter((a) => a.model.startsWith(CLAUDE_CODE_PREFIX));
+  const otherAgents = agents.filter((a) => !a.model.startsWith(CLAUDE_CODE_PREFIX));
+
+  return (
+    <div className="flex max-w-3xl flex-col gap-6">
+      <div>
+        <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Fleet</h1>
+        <p className="text-sm text-muted-foreground">
+          Blurb an idea, have an orchestrator agent refine it into a brief and task breakdown, review and
+          materialize the tasks into real agents and goals, then dispatch and watch them from an org chart.
+        </p>
+      </div>
+
+      {agents.length === 0 ? (
+        <div className="border border-[var(--border)] bg-card p-4 text-sm text-muted-foreground">
+          Fleet needs at least one agent to orchestrate with.{" "}
+          <Link href="/agents" className="text-[var(--primary)] underline underline-offset-2">
+            Create an agent
+          </Link>{" "}
+          first — a <code className="font-mono">claude-code/&lt;model&gt;</code> agent works best for
+          orchestration.
+        </div>
+      ) : (
+        <form onSubmit={handleCreate} className="flex flex-col gap-3 border border-[var(--border)] bg-card p-4">
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Brain dump
+            </span>
+            <textarea
+              value={rawIdea}
+              onChange={(e) => setRawIdea(e.target.value)}
+              placeholder="e.g. a 10-minute YouTube video about optimizing circadian rhythm for energy"
+              rows={3}
+              className="border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]"
+            />
+          </label>
+          <label className="flex flex-col gap-1 sm:max-w-xs">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Orchestrator
+            </span>
+            <select
+              value={orchestratorAgentId}
+              onChange={(e) => setOrchestratorAgentId(e.target.value)}
+              className="border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]"
+            >
+              <option value="" disabled>
+                Select an agent…
+              </option>
+              {claudeAgents.length > 0 && (
+                <optgroup label="Claude Code agents (recommended)">
+                  {claudeAgents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {otherAgents.length > 0 && (
+                <optgroup label="Other agents">
+                  {otherAgents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </label>
+          <div>
+            <Button type="submit" disabled={submitting || !rawIdea.trim() || !orchestratorAgentId}>
+              {submitting ? "Starting…" : "Start Brain Dump"}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {projects.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No projects yet — start one above.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {projects.map((p) => (
+            <Link
+              key={p.id}
+              href={`/fleet/${p.id}`}
+              className="flex items-center justify-between gap-3 border border-[var(--border)] bg-card px-4 py-3 hover:border-[var(--primary)]/50"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">{p.title || p.rawIdea}</div>
+                {p.title && <div className="mt-0.5 truncate text-xs text-muted-foreground">{p.rawIdea}</div>}
+              </div>
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span className="font-mono text-[10px] text-muted-foreground/70">{timeAgo(p.createdAt)}</span>
+                <Badge variant="outline" className={STATUS_STYLE[p.status]}>
+                  {p.status}
+                </Badge>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

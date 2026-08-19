@@ -24,6 +24,8 @@ export interface Goal {
   priority: GoalPriority;
   /** Agents assigned to this goal — the goal is the single source of truth for the relationship. */
   agentIds: string[];
+  /** Set when this goal was generated from a Fleet Project's task plan. */
+  projectId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -53,6 +55,38 @@ export interface Run {
   response: string;
   error?: string;
   archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProjectStatus = "draft" | "refining" | "refined" | "planned" | "error";
+
+/** One task proposed by the orchestrator's refinement pass — not yet a real Agent/Goal. */
+export interface ProposedTask {
+  title: string;
+  description: string;
+  /** Same shape as Agent.model, e.g. "ollama/hermes3" or "claude-code/sonnet". */
+  model: string;
+}
+
+/**
+ * A brain-dump-to-deliverables pipeline: a raw idea, refined by an
+ * orchestrator Agent into a brief + task list, which the user reviews and
+ * turns into real Goals (see ProposedTask). Status only tracks the
+ * refine/plan lifecycle — task completion is derived live from the
+ * resulting Goals/Runs rather than duplicated here, for the same
+ * single-source-of-truth reason `Goal.agentIds` isn't mirrored onto Agent.
+ */
+export interface Project {
+  id: string;
+  rawIdea: string;
+  orchestratorAgentId: string;
+  status: ProjectStatus;
+  title?: string;
+  refinedBrief?: string;
+  assumptions?: string[];
+  proposedTasks?: ProposedTask[];
+  errorMessage?: string;
   createdAt: string;
   updatedAt: string;
 }

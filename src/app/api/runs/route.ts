@@ -2,24 +2,10 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { mutateCollection, readCollection } from "@/lib/store";
 import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
-import { streamClaudeCodeChat } from "@/lib/providers/claude-code";
-import { streamOllamaChat } from "@/lib/providers/ollama";
-import { buildRunPrompt } from "@/lib/runs";
+import { buildRunPrompt, dispatchAgent } from "@/lib/runs";
 import type { Agent, Goal, Run } from "@/lib/types";
 
 const COLLECTION = "runs";
-const CLAUDE_CODE_PREFIX = "claude-code/";
-
-/** Picks a provider by the agent's model prefix — the one thing that needs to change to add a new dispatch path. */
-function dispatchAgent(agent: Agent, system: string, user: string): AsyncGenerator<string> {
-  if (agent.model.startsWith(CLAUDE_CODE_PREFIX)) {
-    return streamClaudeCodeChat(agent.model, system, user);
-  }
-  return streamOllamaChat(agent.model, [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ]);
-}
 
 export const GET = withLocalGuard(async () => {
   const runs = await readCollection<Run>(COLLECTION);
