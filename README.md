@@ -36,16 +36,20 @@ now:
   mirrored back onto `Agent` to avoid a dual-write bidirectional-relationship
   bug.
 - **Runs** (`/runs`) is real execution — the actual orchestration step. Pick
-  an agent and a goal, hit Dispatch, and an Ollama-backed agent (`model:
-  "ollama/<tag>"`) streams a real chat completion back live, token by token,
-  then gets persisted to run history. Not a demo: the first real dispatch —
-  a "Circadian Coach" agent against a goal to optimize circadian rhythm for
-  energy and nervous-system regulation, run on `hermes3:8b` — produced a
-  genuine, useful multi-section protocol in ~7 seconds. Run history has
-  Active/Archived tabs — archive a run to get it out of the way without
-  losing it, or delete one permanently (confirmed via a browser dialog
-  first, since it can't be undone). See `/api/runs` and
-  [Architecture](#architecture).
+  an agent and a goal, hit Dispatch, and the agent streams a real response
+  back live, token by token, then gets persisted to run history. Two
+  dispatch paths exist, picked by the agent's model prefix: `ollama/<tag>`
+  goes to Ollama; `claude-code/<model>` shells out to the Claude Code CLI
+  headlessly (`claude -p ... --output-format stream-json`) with `--tools ""`
+  so it can't take any agentic action — it's a plain chat completion, not a
+  coding session against a goal description it didn't write. Not a demo:
+  the first real dispatch — a "Circadian Coach" agent against a goal to
+  optimize circadian rhythm for energy and nervous-system regulation, run
+  on `hermes3:8b` — produced a genuine, useful multi-section protocol in
+  ~7 seconds. Run history has Active/Archived tabs — archive a run to get
+  it out of the way without losing it, or delete one permanently (confirmed
+  via a browser dialog first, since it can't be undone). See `/api/runs`
+  and [Architecture](#architecture).
 - Chat stream, token/spend budget, and the context canvas are still mock
   data in [`src/lib/mock-data.ts`](src/lib/mock-data.ts).
 
@@ -56,9 +60,8 @@ can't corrupt the file or silently drop an update (`mutateCollection`) —
 this was a real bug caught during testing (concurrent PATCHes
 truncated/duplicated the JSON), not a hypothetical one.
 
-Not built yet, in rough order: dispatching to the Claude Code CLI as a
-second execution path (Runs currently only knows how to call Ollama), a
-content pipeline view, and an agent decision/communication log.
+Not built yet, in rough order: a content pipeline view and an agent
+decision/communication log.
 
 ## Stack
 
@@ -128,17 +131,30 @@ has a regression test.
 read/write-only — it performs real inference. Given an `agentId` and
 `goalId`, [`buildRunPrompt`](src/lib/runs.ts) (a pure function, unit
 tested) turns the agent's role and the goal's title/description/domain/
-priority into a system+user prompt; [`streamOllamaChat`](src/lib/providers/ollama.ts)
-opens a real streaming chat completion against Ollama and yields text
-deltas as an async generator. The route writes a `Run` record immediately
-(status `running`), forwards each delta straight through to the HTTP
-response as plain text as it arrives — so the browser can render tokens
-live instead of waiting for the whole response — and writes the record
-once more (status `complete`/`error`, full response) when the stream ends.
-Currently Ollama-only; routing to a different provider based on the
-agent's `model` prefix (e.g. dispatching a `claude-code/...` agent through
-the Claude Code CLI instead) is the natural next extension and shouldn't
-require touching the route's shape, just the model-resolution step.
+priority into a system+user prompt. A small `dispatchAgent` helper in the
+route picks the provider by the agent's `model` prefix — nothing else about
+the route's shape changes when a new provider is added:
+- `ollama/<tag>` → [`streamOllamaChat`](src/lib/providers/ollama.ts) opens
+  a real streaming chat completion against Ollama and yields text deltas as
+  an async generator.
+- `claude-code/<model>` → [`streamClaudeCodeChat`](src/lib/providers/claude-code.ts)
+  spawns the `claude` CLI headlessly (`-p`, `--output-format stream-json`,
+  `--include-partial-messages`) and parses each `stream_event` line for its
+  text delta. It always runs with `--tools ""`, so the CLI has no
+  Bash/Edit/Read/etc. available — this is meant to behave like a plain chat
+  completion (the same contract `streamOllamaChat` has), not an autonomous
+  coding session against a goal description it didn't write. Args go
+  through `spawn` as an array (no shell), so goal/agent text can't be
+  interpreted as shell syntax. A hard timeout kills the process as a
+  defensive backstop; it's not a workaround for a known hang — a
+  non-interactive `-p` run with no TTY to prompt silently denies any action
+  needing approval rather than blocking on one.
+
+Either way, the route writes a `Run` record immediately (status `running`),
+forwards each delta straight through to the HTTP response as plain text as
+it arrives — so the browser can render tokens live instead of waiting for
+the whole response — and writes the record once more (status
+`complete`/`error`, full response) when the stream ends.
 
 **Run organization.** `PATCH /api/runs/[id]` flips a run's `archived` flag;
 `DELETE /api/runs/[id]` removes one permanently. Both reuse `mutateCollection`,
@@ -172,8 +188,10 @@ project — `store.ts`'s concurrency (10 truly parallel writes, checked for
 data loss and corruption), `http-guard.ts`'s Host-header parsing (which had
 its own bug: naive `split(":")` breaks on bracketed IPv6 literals like
 `[::1]:3000`, caught by writing the test) — plus `runs.ts`'s pure prompt
-builder, since it's the one piece of the dispatch path that's practical to
-test without a live model.
+builder and the pure parsing/resolution helpers in each provider
+(`classifyOllamaModels`, `resolveClaudeCodeModelTag`, `extractStreamDelta`),
+since those are the pieces of the dispatch path that are practical to test
+without a live model or a real CLI process.
 
 ## Project layout
 
@@ -194,6 +212,8 @@ src/
   components/dashboard/MarkdownContent.tsx  Shared markdown+code renderer (chat, run responses)
   components/ui/             shadcn/Base UI primitives
   lib/providers/              Provider abstraction — one file per backend + registry
+  lib/providers/ollama.ts     Ollama health check + streaming chat dispatch
+  lib/providers/claude-code.ts  Claude Code CLI health check + streaming dispatch (--tools "")
   lib/claude-sessions.ts     Reads/tails this project's local session transcripts
   lib/runs.ts                 Pure prompt-building for dispatch (unit tested)
   lib/store.ts               Concurrency-safe local JSON-file persistence (.aurelia/data/)
@@ -223,6 +243,12 @@ src/
 - Session/agent/goal ids from the URL are validated against a strict pattern
   before touching the filesystem or the data store, so there's no
   path-traversal surface in any `[id]` route.
+- The Claude Code CLI dispatch path (`streamClaudeCodeChat`) always runs
+  with `--tools ""` — the CLI gets no Bash/Edit/Read/Write access at all,
+  so a goal description can't cause it to take any action on this machine
+  beyond generating text. It's spawned via `spawn(bin, args)` (an argument
+  array, not a shell string), so nothing in the goal/agent text can be
+  interpreted as shell syntax.
 - `POST /api/runs` performs real inference and is the most expensive/
   consequential route in the app — same `withLocalGuard` + id-validation
   treatment as everything else, but worth knowing it's there: it's the one

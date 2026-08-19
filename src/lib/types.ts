@@ -4,7 +4,7 @@ export interface Agent {
   id: string;
   name: string;
   role: string;
-  /** e.g. "ollama/hermes3" — the model intended to drive this agent once wired up. Not executed yet. */
+  /** e.g. "ollama/hermes3" (dispatched to Ollama) or "claude-code/sonnet" (dispatched to the Claude Code CLI). */
   model: string;
   status: AgentStatus;
   createdAt: string;

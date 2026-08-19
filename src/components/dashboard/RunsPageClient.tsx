@@ -14,8 +14,8 @@ export function RunsPageClient() {
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Dispatch</h1>
         <p className="text-sm text-muted-foreground">
-          Send a real goal to a real agent, routed through whichever model it&apos;s configured for.
-          Ollama-backed agents stream their response live.
+          Send a real goal to a real agent, routed through whichever model it&apos;s configured for —
+          Ollama or the Claude Code CLI. Both stream their response live.
         </p>
       </div>
 

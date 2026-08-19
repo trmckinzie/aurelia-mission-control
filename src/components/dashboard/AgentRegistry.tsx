@@ -84,8 +84,9 @@ export function AgentRegistry() {
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Agent Registry</h1>
         <p className="text-sm text-muted-foreground">
-          Define an agent here, assign it to a goal, then dispatch it from the Runs page —
-          Ollama-backed agents (<code className="font-mono">ollama/&lt;model&gt;</code>) actually run.
+          Define an agent here, assign it to a goal, then dispatch it from the Runs page — both{" "}
+          <code className="font-mono">ollama/&lt;model&gt;</code> (Ollama) and{" "}
+          <code className="font-mono">claude-code/&lt;model&gt;</code> (Claude Code CLI) agents actually run.
         </p>
       </div>
 
@@ -106,7 +107,7 @@ export function AgentRegistry() {
           <input
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            placeholder="Model (e.g. ollama/hermes3)"
+            placeholder="Model (e.g. ollama/hermes3 or claude-code/sonnet)"
             className="border border-[var(--border)] bg-background px-2.5 py-1.5 font-mono text-sm outline-none focus-visible:border-[var(--primary)]"
           />
         </div>

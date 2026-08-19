@@ -2,11 +2,24 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { mutateCollection, readCollection } from "@/lib/store";
 import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
+import { streamClaudeCodeChat } from "@/lib/providers/claude-code";
 import { streamOllamaChat } from "@/lib/providers/ollama";
 import { buildRunPrompt } from "@/lib/runs";
 import type { Agent, Goal, Run } from "@/lib/types";
 
 const COLLECTION = "runs";
+const CLAUDE_CODE_PREFIX = "claude-code/";
+
+/** Picks a provider by the agent's model prefix — the one thing that needs to change to add a new dispatch path. */
+function dispatchAgent(agent: Agent, system: string, user: string): AsyncGenerator<string> {
+  if (agent.model.startsWith(CLAUDE_CODE_PREFIX)) {
+    return streamClaudeCodeChat(agent.model, system, user);
+  }
+  return streamOllamaChat(agent.model, [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ]);
+}
 
 export const GET = withLocalGuard(async () => {
   const runs = await readCollection<Run>(COLLECTION);
@@ -15,11 +28,12 @@ export const GET = withLocalGuard(async () => {
 });
 
 /**
- * Dispatches a real agent against a real goal through Ollama and streams the
- * response back as plain text as it's generated. The run record is written
- * once immediately (status "running") and once more when the stream ends
- * (status "complete"/"error") — not on every token, to avoid hammering the
- * JSON store during generation.
+ * Dispatches a real agent against a real goal — through Ollama or the Claude
+ * Code CLI, based on the agent's model prefix — and streams the response
+ * back as plain text as it's generated. The run record is written once
+ * immediately (status "running") and once more when the stream ends (status
+ * "complete"/"error") — not on every token, to avoid hammering the JSON
+ * store during generation.
  */
 export const POST = withLocalGuard(async (request) => {
   const body = await parseJsonBody(request);
@@ -61,10 +75,7 @@ export const POST = withLocalGuard(async (request) => {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const delta of streamOllamaChat(agent.model, [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ])) {
+        for await (const delta of dispatchAgent(agent, system, user)) {
           fullResponse += delta;
           controller.enqueue(encoder.encode(delta));
         }
