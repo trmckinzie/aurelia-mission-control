@@ -15,12 +15,14 @@ export interface ProviderStatusResult {
   /** Short human-readable detail, e.g. "No Hermes model pulled" or "v2.1.229". */
   detail: string;
   checkedAt: string;
+  /** Model values (already in Agent.model form, e.g. "ollama/hermes3:8b") this provider can actually serve right now — the source of truth for model pickers, see catalog.ts. */
+  models?: string[];
 }
 
 export interface ProviderCheck {
   id: ProviderId;
   label: string;
-  check(): Promise<Pick<ProviderStatusResult, "status" | "detail">>;
+  check(): Promise<Pick<ProviderStatusResult, "status" | "detail" | "models">>;
 }
 
 export const CLAUDE_CODE_MODEL_PREFIX = "claude-code/";

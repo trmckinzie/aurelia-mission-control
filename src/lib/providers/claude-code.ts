@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+import { CLAUDE_CODE_MODEL_VALUES } from "@/lib/providers/catalog";
 import type { ProviderCheck } from "@/lib/providers/types";
 
 const execFileAsync = promisify(execFile);
@@ -24,7 +25,7 @@ export const claudeCodeProvider: ProviderCheck = {
     try {
       const { stdout } = await execFileAsync(bin, ["--version"], { timeout: TIMEOUT_MS });
       const version = stdout.trim().split("\n")[0] || "unknown version";
-      return { status: "ready" as const, detail: version };
+      return { status: "ready" as const, detail: version, models: CLAUDE_CODE_MODEL_VALUES };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code;
       if (code === "ENOENT") {
@@ -44,12 +45,28 @@ interface ClaudeCodeStreamLine {
   type?: string;
   event?: { delta?: { type?: string; text?: string } };
   result?: string;
+  is_error?: boolean;
 }
 
 /** Pure parsing — no I/O — so it's testable without spawning a process. */
 export function extractStreamDelta(line: ClaudeCodeStreamLine): string | null {
   if (line.type === "stream_event" && line.event?.delta?.type === "text_delta") {
     return line.event.delta.text ?? null;
+  }
+  return null;
+}
+
+/**
+ * Pure parsing — an API-level failure (bad --model value, rate limit, etc.)
+ * never reaches stderr: the CLI reports it on stdout as a "result" line with
+ * is_error:true and a human-readable message in `result`, then exits nonzero
+ * with no other explanation. Without this, a nonzero exit with empty stderr
+ * (the common case for this class of failure) surfaced as a bare "exited
+ * with code 1" that gave no way to tell an invalid model from anything else.
+ */
+export function extractResultError(line: ClaudeCodeStreamLine): string | null {
+  if (line.type === "result" && line.is_error === true && typeof line.result === "string") {
+    return line.result;
   }
   return null;
 }
@@ -106,6 +123,7 @@ export async function* streamClaudeCodeChat(model: string, system: string, user:
 
   let emittedAny = false;
   let lastResult = "";
+  let lastResultError: string | null = null;
 
   try {
     if (child.stdout) {
@@ -127,6 +145,7 @@ export async function* streamClaudeCodeChat(model: string, system: string, user:
         if (parsed.type === "result" && typeof parsed.result === "string") {
           lastResult = parsed.result;
         }
+        lastResultError = extractResultError(parsed) ?? lastResultError;
       }
     }
 
@@ -138,7 +157,8 @@ export async function* streamClaudeCodeChat(model: string, system: string, user:
       if (timedOut) {
         throw new Error(`Claude Code CLI timed out after ${DISPATCH_TIMEOUT_MS / 1000}s`);
       }
-      throw new Error(`Claude Code CLI exited with code ${exitCode}${stderrBuf.trim() ? `: ${stderrBuf.trim()}` : ""}`);
+      const detail = stderrBuf.trim() || lastResultError || "";
+      throw new Error(`Claude Code CLI exited with code ${exitCode}${detail ? `: ${detail}` : ""}`);
     }
 
     if (!emittedAny && lastResult) {

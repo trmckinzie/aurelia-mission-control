@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/dashboard/MarkdownContent";
+import { modelOptionGroups } from "@/lib/providers/catalog";
 import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
 import type { ProviderStatus, ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, Goal, Project, ProjectStatus, ProposedTask, Run, RunStatus } from "@/lib/types";
@@ -265,11 +266,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     .map((g) => ({ goal: g, run: latestRunFor(g.id) }))
     .filter((d): d is { goal: Goal; run: Run } => d.run?.status === "complete");
 
-  const knownModels = Array.from(new Set(agents.map((a) => a.model)));
-  const claudeReady = providers.find((p) => p.id === "claude-code")?.status === "ready";
-  if (claudeReady && !knownModels.some((m) => providerIdForModel(m) === "claude-code")) {
-    knownModels.push("claude-code/sonnet");
-  }
+  const knownModels = modelOptionGroups(providers, agents).flatMap((g) => g.options.map((o) => o.value));
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">

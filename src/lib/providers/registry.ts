@@ -9,12 +9,13 @@ const PROVIDERS: ProviderCheck[] = [ollamaProvider, claudeCodeProvider];
 export async function checkAllProviders(): Promise<ProviderStatusResult[]> {
   return Promise.all(
     PROVIDERS.map(async (provider) => {
-      const { status, detail } = await provider.check();
+      const { status, detail, models } = await provider.check();
       return {
         id: provider.id,
         label: provider.label,
         status,
         detail,
+        models,
         checkedAt: new Date().toISOString(),
       };
     })

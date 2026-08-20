@@ -3,9 +3,16 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ModelPicker } from "@/components/dashboard/ModelPicker";
+import { defaultModelValue, modelOptionGroups } from "@/lib/providers/catalog";
 import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
 import type { ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, AgentStatus } from "@/lib/types";
+
+const EXAMPLE_AGENT = {
+  name: "Research Assistant",
+  role: "Gathers and fact-checks source material for a task before a writer or reviewer builds on it — cites where each claim comes from.",
+};
 
 const STATUS_STYLE: Record<AgentStatus, string> = {
   defined: "border-[var(--border)] text-muted-foreground",
@@ -26,7 +33,7 @@ export function AgentRegistry() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [model, setModel] = useState("ollama/hermes3");
+  const [model, setModel] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -44,13 +51,23 @@ export function AgentRegistry() {
       if (!agentsRes.ok) throw new Error("request failed");
       const data: { agents: Agent[] } = await agentsRes.json();
       setAgents(data.agents);
+      let liveProviders: ProviderStatusResult[] = [];
       if (providersRes.ok) {
         const providersData: { providers: ProviderStatusResult[] } = await providersRes.json();
-        setProviders(providersData.providers);
+        liveProviders = providersData.providers;
+        setProviders(liveProviders);
       }
+      // Only fills in a sensible starting point — never overwrites a value the user has already typed.
+      setModel((prev) => prev || defaultModelValue(modelOptionGroups(liveProviders, data.agents), liveProviders));
     } catch {
       setError("Could not load agents.");
     }
+  }
+
+  function insertExample() {
+    setName(EXAMPLE_AGENT.name);
+    setRole(EXAMPLE_AGENT.role);
+    setModel(defaultModelValue(modelOptionGroups(providers, agents ?? []), providers));
   }
 
   function providerWarning(model: string): string | null {
@@ -152,14 +169,19 @@ export function AgentRegistry() {
     }
   }
 
+  const modelGroups = modelOptionGroups(providers, agents ?? []);
+
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Agent Registry</h1>
         <p className="text-sm text-muted-foreground">
-          Define an agent here, assign it to a goal, then dispatch it from the Runs page — both{" "}
-          <code className="font-mono">ollama/&lt;model&gt;</code> (Ollama) and{" "}
-          <code className="font-mono">claude-code/&lt;model&gt;</code> (Claude Code CLI) agents actually run.
+          Define an agent here, assign it to a goal, then dispatch it from the Runs page. Pick a model from the
+          list — it only offers <code className="font-mono">ollama/&lt;model&gt;</code> (Ollama) and{" "}
+          <code className="font-mono">claude-code/&lt;model&gt;</code> (Claude Code CLI) values that actually run,
+          or use <span className="font-mono">Custom…</span> if you know what you&apos;re doing. New here? Click{" "}
+          <span className="font-medium text-foreground">Insert example agent</span> below to see a real, working
+          definition you can submit as-is.
         </p>
       </div>
 
@@ -177,16 +199,15 @@ export function AgentRegistry() {
             placeholder="Role (e.g. drafts weekly content plan)"
             className={EDIT_INPUT_CLASS}
           />
-          <input
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="Model (e.g. ollama/hermes3 or claude-code/sonnet)"
-            className={`${EDIT_INPUT_CLASS} font-mono`}
-          />
+          <ModelPicker value={model} onChange={setModel} groups={modelGroups} className={EDIT_INPUT_CLASS} />
         </div>
-        <div>
+        {providerWarning(model) && <p className="text-xs text-[var(--hud-warning)]">⚠ {providerWarning(model)}</p>}
+        <div className="flex items-center gap-3">
           <Button type="submit" disabled={submitting}>
             {submitting ? "Adding…" : "Add Agent"}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={insertExample}>
+            Insert example agent
           </Button>
         </div>
       </form>
@@ -208,11 +229,7 @@ export function AgentRegistry() {
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                       <input value={editName} onChange={(e) => setEditName(e.target.value)} className={EDIT_INPUT_CLASS} />
                       <input value={editRole} onChange={(e) => setEditRole(e.target.value)} className={EDIT_INPUT_CLASS} />
-                      <input
-                        value={editModel}
-                        onChange={(e) => setEditModel(e.target.value)}
-                        className={`${EDIT_INPUT_CLASS} font-mono`}
-                      />
+                      <ModelPicker value={editModel} onChange={setEditModel} groups={modelGroups} className={EDIT_INPUT_CLASS} />
                     </div>
                     {providerWarning(editModel) && (
                       <p className="text-xs text-[var(--hud-warning)]">⚠ {providerWarning(editModel)}</p>

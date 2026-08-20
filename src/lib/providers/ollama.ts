@@ -106,6 +106,7 @@ export const ollamaProvider: ProviderCheck = {
     if (!result.reachable) {
       return { status: "unreachable" as ProviderStatus, detail: `Ollama not detected at ${baseUrl}` };
     }
-    return classifyOllamaModels(result.models);
+    const { status, detail } = classifyOllamaModels(result.models);
+    return { status, detail, models: result.models.map((m) => `ollama/${m}`) };
   },
 };

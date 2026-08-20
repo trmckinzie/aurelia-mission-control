@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { extractStreamDelta, resolveClaudeCodeModelTag } from "@/lib/providers/claude-code";
+import { extractResultError, extractStreamDelta, resolveClaudeCodeModelTag } from "@/lib/providers/claude-code";
 
 describe("resolveClaudeCodeModelTag", () => {
   test("strips the claude-code/ prefix", () => {
@@ -33,5 +33,21 @@ describe("extractStreamDelta", () => {
 
   test("ignores result lines", () => {
     assert.equal(extractStreamDelta({ type: "result", result: "full text" }), null);
+  });
+});
+
+describe("extractResultError", () => {
+  test("extracts the message from an is_error result line", () => {
+    const line = { type: "result", is_error: true, result: "model_not_found: sonnet 5" };
+    assert.equal(extractResultError(line), "model_not_found: sonnet 5");
+  });
+
+  test("ignores a successful result line", () => {
+    const line = { type: "result", is_error: false, result: "the actual answer" };
+    assert.equal(extractResultError(line), null);
+  });
+
+  test("ignores non-result lines", () => {
+    assert.equal(extractResultError({ type: "system" }), null);
   });
 });
