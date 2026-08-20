@@ -27,7 +27,11 @@ export function buildRefinePrompt(rawIdea: string): BuiltRefinePrompt {
     '      "description": string (what this task\'s finished output should be),\n' +
     '      "model": string (a suggested worker, e.g. "ollama/llama3.1" for a straightforward mechanical ' +
     'task, or "claude-code/sonnet" for a task needing sharper judgment or creativity — the user reviews ' +
-    "and can change this before anything is created)\n" +
+    "and can change this before anything is created),\n" +
+    '      "dependsOn": string[] (optional — exact titles of OTHER tasks in this same list whose output ' +
+    "this task needs, e.g. a review/quality-control task should depend on every task producing what it " +
+    "reviews, a voiceover task should depend on the task producing the script it reads. Omit or leave " +
+    "empty for a task that can run entirely on its own.)\n" +
     "    }\n" +
     "  ]\n" +
     "}\n\n" +
@@ -84,6 +88,7 @@ export function parseRefinedPlan(text: string): ParsedPlan | null {
       title: isNonEmptyString(t.title) ? t.title.trim() : "",
       description: isNonEmptyString(t.description) ? t.description.trim() : "",
       model: isNonEmptyString(t.model) ? t.model.trim() : "",
+      dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.filter(isNonEmptyString).map((d) => d.trim()) : [],
     }))
     .filter((t) => t.title && t.description && t.model);
 

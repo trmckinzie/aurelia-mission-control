@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/dashboard/MarkdownContent";
+import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
+import type { ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, Goal, RunStatus } from "@/lib/types";
 
 const STATUS_STYLE: Record<RunStatus, string> = {
@@ -28,6 +30,7 @@ interface DispatchPanelProps {
 export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: DispatchPanelProps) {
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [goals, setGoals] = useState<Goal[] | null>(null);
+  const [providers, setProviders] = useState<ProviderStatusResult[]>([]);
   const [loadError, setLoadError] = useState(false);
 
   const [agentId, setAgentId] = useState(initialAgentId ?? "");
@@ -44,15 +47,20 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
   useEffect(() => {
     async function load() {
       try {
-        const [agentsRes, goalsRes] = await Promise.all([
+        const [agentsRes, goalsRes, providersRes] = await Promise.all([
           fetch("/api/agents", { cache: "no-store" }),
           fetch("/api/goals", { cache: "no-store" }),
+          fetch("/api/providers", { cache: "no-store" }),
         ]);
         if (!agentsRes.ok || !goalsRes.ok) throw new Error("request failed");
         const agentsData: { agents: Agent[] } = await agentsRes.json();
         const goalsData: { goals: Goal[] } = await goalsRes.json();
         setAgents(agentsData.agents);
         setGoals(goalsData.goals);
+        if (providersRes.ok) {
+          const providersData: { providers: ProviderStatusResult[] } = await providersRes.json();
+          setProviders(providersData.providers);
+        }
       } catch {
         setLoadError(true);
       }
@@ -144,6 +152,13 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
   const assignedAgents = selectedGoal ? agents.filter((a) => selectedGoal.agentIds.includes(a.id)) : [];
   const otherAgents = selectedGoal ? agents.filter((a) => !selectedGoal.agentIds.includes(a.id)) : agents;
 
+  const selectedAgent = agents.find((a) => a.id === agentId);
+  const selectedAgentProviderStatus = selectedAgent ? agentProviderStatus(selectedAgent.model, providers) : "unknown";
+  const selectedAgentProviderLabel = selectedAgent
+    ? (providers.find((p) => p.id === providerIdForModel(selectedAgent.model))?.label ??
+      providerIdForModel(selectedAgent.model))
+    : "";
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 border border-[var(--border)] bg-card p-4 sm:flex-row sm:items-end">
@@ -206,6 +221,12 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
           {status === "running" ? "Dispatching…" : "Dispatch"}
         </Button>
       </div>
+
+      {selectedAgent && selectedAgentProviderStatus !== "ready" && (
+        <p className="text-xs text-[var(--hud-warning)]">
+          ⚠ {selectedAgentProviderLabel} is currently {selectedAgentProviderStatus} — dispatch will likely fail.
+        </p>
+      )}
 
       {runMeta && (
         <div className="flex flex-col border border-[var(--border)] bg-[color-mix(in_oklab,var(--card)_85%,black)]">

@@ -80,4 +80,32 @@ describe("parseRefinedPlan", () => {
     const plan = parseRefinedPlan(noAssumptions);
     assert.deepEqual(plan?.assumptions, []);
   });
+
+  test("parses dependsOn per task", () => {
+    const withDeps = JSON.stringify({
+      title: "T",
+      brief: "B",
+      tasks: [
+        { title: "Script Writing", description: "write it", model: "ollama/x" },
+        { title: "Quality Control", description: "review it", model: "claude-code/sonnet", dependsOn: ["Script Writing"] },
+      ],
+    });
+    const plan = parseRefinedPlan(withDeps);
+    assert.deepEqual(plan?.tasks[0].dependsOn, []);
+    assert.deepEqual(plan?.tasks[1].dependsOn, ["Script Writing"]);
+  });
+
+  test("defaults dependsOn to an empty array when omitted, and drops non-string entries", () => {
+    const messyDeps = JSON.stringify({
+      title: "T",
+      brief: "B",
+      tasks: [
+        { title: "a", description: "b", model: "ollama/x" },
+        { title: "c", description: "d", model: "ollama/x", dependsOn: ["a", 5, null, "  "] },
+      ],
+    });
+    const plan = parseRefinedPlan(messyDeps);
+    assert.deepEqual(plan?.tasks[0].dependsOn, []);
+    assert.deepEqual(plan?.tasks[1].dependsOn, ["a"]);
+  });
 });

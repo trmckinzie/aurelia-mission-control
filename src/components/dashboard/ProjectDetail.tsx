@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/dashboard/MarkdownContent";
+import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
+import type { ProviderStatus, ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, Goal, Project, ProjectStatus, ProposedTask, Run, RunStatus } from "@/lib/types";
 
 const PROJECT_STATUS_STYLE: Record<ProjectStatus, string> = {
@@ -25,14 +27,26 @@ const RUN_STATUS_STYLE: Record<RunStatus, string> = {
 const TASK_INPUT_CLASS =
   "border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]";
 
+const CUSTOM_MODEL_VALUE = "__custom__";
+
 interface TaskCardProps {
   goal: Goal;
   agent: Agent | undefined;
   latestRun: Run | undefined;
+  providerStatus: ProviderStatus;
+  dependsOnTitles: string[];
+  dependenciesReady: boolean;
 }
 
-function TaskCard({ goal, agent, latestRun }: TaskCardProps) {
+function TaskCard({ goal, agent, latestRun, providerStatus, dependsOnTitles, dependenciesReady }: TaskCardProps) {
   const href = `/runs?goalId=${goal.id}${agent ? `&agentId=${agent.id}` : ""}`;
+  const statusLabel = latestRun ? latestRun.status : dependenciesReady ? "not dispatched" : "waiting on deps";
+  const statusStyle = latestRun
+    ? RUN_STATUS_STYLE[latestRun.status]
+    : dependenciesReady
+      ? "border-[var(--border)] text-muted-foreground"
+      : "border-[var(--hud-warning)] text-[var(--hud-warning)]";
+
   return (
     <Link
       href={href}
@@ -40,15 +54,18 @@ function TaskCard({ goal, agent, latestRun }: TaskCardProps) {
     >
       <span className="truncate text-sm font-semibold text-foreground">{goal.title}</span>
       <span className="truncate text-xs text-muted-foreground">{agent?.name ?? "Unassigned"}</span>
+      {dependsOnTitles.length > 0 && (
+        <span className="truncate text-[10px] text-muted-foreground/70">Depends on: {dependsOnTitles.join(", ")}</span>
+      )}
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-mono text-[10px] text-muted-foreground/70">{agent?.model}</span>
-        <Badge
-          variant="outline"
-          className={latestRun ? RUN_STATUS_STYLE[latestRun.status] : "border-[var(--border)] text-muted-foreground"}
-        >
-          {latestRun?.status ?? "not dispatched"}
+        <Badge variant="outline" className={statusStyle}>
+          {statusLabel}
         </Badge>
       </div>
+      {providerStatus !== "ready" && providerStatus !== "unknown" && (
+        <span className="text-[10px] text-[var(--hud-warning)]">⚠ provider {providerStatus}</span>
+      )}
     </Link>
   );
 }
@@ -59,6 +76,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [providers, setProviders] = useState<ProviderStatusResult[]>([]);
   const [loadError, setLoadError] = useState(false);
 
   const [refining, setRefining] = useState(false);
@@ -66,6 +84,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [refineError, setRefineError] = useState<string | null>(null);
 
   const [editableTasks, setEditableTasks] = useState<ProposedTask[]>([]);
+  const [customModelRows, setCustomModelRows] = useState<Record<number, boolean>>({});
   const [planning, setPlanning] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
@@ -74,11 +93,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const load = useCallback(async () => {
     try {
-      const [projectRes, agentsRes, goalsRes, runsRes] = await Promise.all([
+      const [projectRes, agentsRes, goalsRes, runsRes, providersRes] = await Promise.all([
         fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
         fetch("/api/agents", { cache: "no-store" }),
         fetch("/api/goals", { cache: "no-store" }),
         fetch("/api/runs", { cache: "no-store" }),
+        fetch("/api/providers", { cache: "no-store" }),
       ]);
       if (!projectRes.ok) throw new Error("request failed");
       const projectData: { project: Project } = await projectRes.json();
@@ -89,7 +109,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       setAgents(agentsData.agents);
       setGoals(goalsData.goals);
       setRuns(runsData.runs);
+      if (providersRes.ok) {
+        const providersData: { providers: ProviderStatusResult[] } = await providersRes.json();
+        setProviders(providersData.providers);
+      }
       setEditableTasks(projectData.project.proposedTasks ?? []);
+      setCustomModelRows({});
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -133,11 +158,40 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   function updateTask(index: number, patch: Partial<ProposedTask>) {
-    setEditableTasks((prev) => prev.map((t, i) => (i === index ? { ...t, ...patch } : t)));
+    setEditableTasks((prev) => {
+      const oldTitle = prev[index].title;
+      const next = prev.map((t, i) => (i === index ? { ...t, ...patch } : t));
+      if (patch.title !== undefined && patch.title !== oldTitle) {
+        return next.map((t) =>
+          t.dependsOn?.includes(oldTitle)
+            ? { ...t, dependsOn: t.dependsOn.map((d) => (d === oldTitle ? patch.title! : d)) }
+            : t
+        );
+      }
+      return next;
+    });
+  }
+
+  function toggleDependsOn(index: number, siblingTitle: string) {
+    setEditableTasks((prev) =>
+      prev.map((t, i) => {
+        if (i !== index) return t;
+        const current = t.dependsOn ?? [];
+        const next = current.includes(siblingTitle)
+          ? current.filter((d) => d !== siblingTitle)
+          : [...current, siblingTitle];
+        return { ...t, dependsOn: next };
+      })
+    );
   }
 
   function removeTask(index: number) {
-    setEditableTasks((prev) => prev.filter((_, i) => i !== index));
+    setEditableTasks((prev) => {
+      const removedTitle = prev[index].title;
+      return prev
+        .filter((_, i) => i !== index)
+        .map((t) => ({ ...t, dependsOn: (t.dependsOn ?? []).filter((d) => d !== removedTitle) }));
+    });
   }
 
   async function materializePlan() {
@@ -199,12 +253,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   const orchestrator = agents.find((a) => a.id === project.orchestratorAgentId);
+  const orchestratorProviderStatus = orchestrator ? agentProviderStatus(orchestrator.model, providers) : "unknown";
+  const orchestratorProviderLabel = orchestrator
+    ? (providers.find((p) => p.id === providerIdForModel(orchestrator.model))?.label ?? providerIdForModel(orchestrator.model))
+    : "";
+
   const taskGoals = goals.filter((g) => g.projectId === projectId);
   const latestRunFor = (goalId: string) => runs.find((r) => r.goalId === goalId);
   const completeCount = taskGoals.filter((g) => latestRunFor(g.id)?.status === "complete").length;
   const deliverables = taskGoals
     .map((g) => ({ goal: g, run: latestRunFor(g.id) }))
     .filter((d): d is { goal: Goal; run: Run } => d.run?.status === "complete");
+
+  const knownModels = Array.from(new Set(agents.map((a) => a.model)));
+  const claudeReady = providers.find((p) => p.id === "claude-code")?.status === "ready";
+  if (claudeReady && !knownModels.some((m) => providerIdForModel(m) === "claude-code")) {
+    knownModels.push("claude-code/sonnet");
+  }
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">
@@ -238,6 +303,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         <div className="border border-[var(--border)] bg-card p-4">
           {project.status === "draft" && (
             <p className="mb-3 text-sm text-muted-foreground">Ready to refine this into a brief and task breakdown.</p>
+          )}
+          {orchestrator && orchestratorProviderStatus !== "ready" && (
+            <p className="mb-3 text-xs text-[var(--hud-warning)]">
+              ⚠ {orchestratorProviderLabel} is currently {orchestratorProviderStatus} — refining will likely fail.
+              Check AI Providers in the sidebar.
+            </p>
           )}
           <Button onClick={startRefine} disabled={refining}>
             {refining ? "Refining…" : orchestrator ? `Refine with ${orchestrator.name}` : "Refine"}
@@ -288,35 +359,108 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 Proposed Tasks
               </h2>
               <div className="flex flex-col gap-2">
-                {editableTasks.map((task, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-1 items-center gap-2 border border-[var(--border)] bg-card p-3 sm:grid-cols-[2fr_2fr_1fr_auto]"
-                  >
-                    <input
-                      value={task.title}
-                      onChange={(e) => updateTask(i, { title: e.target.value })}
-                      className={TASK_INPUT_CLASS}
-                    />
-                    <input
-                      value={task.description}
-                      onChange={(e) => updateTask(i, { description: e.target.value })}
-                      className={TASK_INPUT_CLASS}
-                    />
-                    <input
-                      value={task.model}
-                      onChange={(e) => updateTask(i, { model: e.target.value })}
-                      className={`${TASK_INPUT_CLASS} font-mono`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeTask(i)}
-                      className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground hover:text-[var(--hud-critical)]"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                {editableTasks.map((task, i) => {
+                  const isKnownModel = knownModels.includes(task.model);
+                  const showCustom = customModelRows[i] === true || !isKnownModel;
+                  const siblingTitles = editableTasks
+                    .map((t) => t.title)
+                    .filter((t, idx) => idx !== i && t.trim().length > 0);
+
+                  return (
+                    <div key={i} className="flex flex-col gap-2 border border-[var(--border)] bg-card p-3">
+                      <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[2fr_2fr_1fr_auto]">
+                        <input
+                          value={task.title}
+                          onChange={(e) => updateTask(i, { title: e.target.value })}
+                          className={TASK_INPUT_CLASS}
+                        />
+                        <input
+                          value={task.description}
+                          onChange={(e) => updateTask(i, { description: e.target.value })}
+                          className={TASK_INPUT_CLASS}
+                        />
+                        {showCustom ? (
+                          <input
+                            value={task.model}
+                            onChange={(e) => updateTask(i, { model: e.target.value })}
+                            placeholder="e.g. ollama/llama3.1"
+                            className={`${TASK_INPUT_CLASS} font-mono`}
+                          />
+                        ) : (
+                          <select
+                            value={task.model}
+                            onChange={(e) => {
+                              if (e.target.value === CUSTOM_MODEL_VALUE) {
+                                setCustomModelRows((prev) => ({ ...prev, [i]: true }));
+                              } else {
+                                updateTask(i, { model: e.target.value });
+                              }
+                            }}
+                            className={`${TASK_INPUT_CLASS} font-mono`}
+                          >
+                            {knownModels.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                            <option value={CUSTOM_MODEL_VALUE}>Custom…</option>
+                          </select>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeTask(i)}
+                          className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground hover:text-[var(--hud-critical)]"
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      {showCustom && !isKnownModel && (
+                        <p className="text-[11px] text-[var(--hud-warning)]">
+                          ⚠ &quot;{task.model || "(empty)"}&quot; doesn&apos;t match any existing agent or known
+                          provider — double-check it&apos;s real before creating an agent from it.
+                          {knownModels.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomModelRows((prev) => ({ ...prev, [i]: false }));
+                                updateTask(i, { model: knownModels[0] });
+                              }}
+                              className="ml-2 text-[var(--primary)] hover:underline"
+                            >
+                              Choose a known model instead
+                            </button>
+                          )}
+                        </p>
+                      )}
+
+                      {siblingTitles.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
+                            Depends on:
+                          </span>
+                          {siblingTitles.map((title) => {
+                            const active = (task.dependsOn ?? []).includes(title);
+                            return (
+                              <button
+                                key={title}
+                                type="button"
+                                onClick={() => toggleDependsOn(i, title)}
+                                className={`border px-1.5 py-0.5 font-mono text-[10px] ${
+                                  active
+                                    ? "border-[var(--primary)] text-[var(--primary)]"
+                                    : "border-[var(--border)] text-muted-foreground/70 hover:text-foreground"
+                                }`}
+                              >
+                                {title}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div className="mt-3 flex items-center gap-3">
                 <Button onClick={materializePlan} disabled={planning || editableTasks.length === 0}>
@@ -349,14 +493,26 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <div className="h-4 w-px bg-[var(--border)]" />
             <div className="w-full border-t border-[var(--border)] pt-4">
               <div className="flex flex-wrap justify-center gap-3">
-                {taskGoals.map((goal) => (
-                  <TaskCard
-                    key={goal.id}
-                    goal={goal}
-                    agent={agents.find((a) => a.id === goal.agentIds[0])}
-                    latestRun={latestRunFor(goal.id)}
-                  />
-                ))}
+                {taskGoals.map((goal) => {
+                  const agent = agents.find((a) => a.id === goal.agentIds[0]);
+                  const dependsOnTitles = (goal.dependsOnGoalIds ?? [])
+                    .map((depId) => goals.find((g) => g.id === depId)?.title)
+                    .filter((t): t is string => Boolean(t));
+                  const dependenciesReady = (goal.dependsOnGoalIds ?? []).every((depId) =>
+                    runs.some((r) => r.goalId === depId && r.status === "complete")
+                  );
+                  return (
+                    <TaskCard
+                      key={goal.id}
+                      goal={goal}
+                      agent={agent}
+                      latestRun={latestRunFor(goal.id)}
+                      providerStatus={agent ? agentProviderStatus(agent.model, providers) : "unknown"}
+                      dependsOnTitles={dependsOnTitles}
+                      dependenciesReady={dependenciesReady}
+                    />
+                  );
+                })}
               </div>
             </div>
             <p className="font-mono text-[11px] text-muted-foreground">

@@ -26,6 +26,8 @@ export interface Goal {
   agentIds: string[];
   /** Set when this goal was generated from a Fleet Project's task plan. */
   projectId?: string;
+  /** Other goals (usually sibling Fleet tasks) whose latest complete Run output gets injected as context when this goal is dispatched. */
+  dependsOnGoalIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -67,6 +69,8 @@ export interface ProposedTask {
   description: string;
   /** Same shape as Agent.model, e.g. "ollama/hermes3" or "claude-code/sonnet". */
   model: string;
+  /** Titles of sibling tasks in the same proposed plan this one needs the output of (e.g. a review task depending on what it reviews). Resolved to Goal.dependsOnGoalIds at materialization. */
+  dependsOn?: string[];
 }
 
 /**

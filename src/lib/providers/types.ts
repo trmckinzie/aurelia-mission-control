@@ -22,3 +22,19 @@ export interface ProviderCheck {
   label: string;
   check(): Promise<Pick<ProviderStatusResult, "status" | "detail">>;
 }
+
+export const CLAUDE_CODE_MODEL_PREFIX = "claude-code/";
+
+/** Agent.model is a free-text label like "ollama/hermes3" or "claude-code/sonnet" — this is the one place that maps it to a provider id. */
+export function providerIdForModel(model: string): ProviderId {
+  return model.startsWith(CLAUDE_CODE_MODEL_PREFIX) ? "claude-code" : "ollama";
+}
+
+/** Pure — no I/O — so callers just pass in whatever /api/providers already returned. */
+export function agentProviderStatus(
+  model: string,
+  providers: Pick<ProviderStatusResult, "id" | "status">[]
+): ProviderStatus {
+  const id = providerIdForModel(model);
+  return providers.find((p) => p.id === id)?.status ?? "unknown";
+}

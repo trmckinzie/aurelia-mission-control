@@ -3,6 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
+import type { ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, AgentStatus } from "@/lib/types";
 
 const STATUS_STYLE: Record<AgentStatus, string> = {
@@ -20,6 +22,7 @@ const EDIT_INPUT_CLASS =
 
 export function AgentRegistry() {
   const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [providers, setProviders] = useState<ProviderStatusResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
@@ -34,13 +37,28 @@ export function AgentRegistry() {
 
   async function load() {
     try {
-      const res = await fetch("/api/agents", { cache: "no-store" });
-      if (!res.ok) throw new Error("request failed");
-      const data: { agents: Agent[] } = await res.json();
+      const [agentsRes, providersRes] = await Promise.all([
+        fetch("/api/agents", { cache: "no-store" }),
+        fetch("/api/providers", { cache: "no-store" }),
+      ]);
+      if (!agentsRes.ok) throw new Error("request failed");
+      const data: { agents: Agent[] } = await agentsRes.json();
       setAgents(data.agents);
+      if (providersRes.ok) {
+        const providersData: { providers: ProviderStatusResult[] } = await providersRes.json();
+        setProviders(providersData.providers);
+      }
     } catch {
       setError("Could not load agents.");
     }
+  }
+
+  function providerWarning(model: string): string | null {
+    if (!model.trim()) return null;
+    const status = agentProviderStatus(model, providers);
+    if (status === "ready" || status === "unknown") return null;
+    const label = providers.find((p) => p.id === providerIdForModel(model))?.label ?? providerIdForModel(model);
+    return `${label} is currently ${status} — this agent won't be able to dispatch until that's fixed.`;
   }
 
   useEffect(() => {
@@ -196,6 +214,9 @@ export function AgentRegistry() {
                         className={`${EDIT_INPUT_CLASS} font-mono`}
                       />
                     </div>
+                    {providerWarning(editModel) && (
+                      <p className="text-xs text-[var(--hud-warning)]">⚠ {providerWarning(editModel)}</p>
+                    )}
                     <div className="flex items-center gap-2">
                       <Button type="button" size="sm" disabled={savingEdit} onClick={() => saveEdit(agent.id)}>
                         {savingEdit ? "Saving…" : "Save"}
@@ -216,6 +237,9 @@ export function AgentRegistry() {
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">{agent.role}</div>
                       <div className="mt-0.5 font-mono text-[11px] text-muted-foreground/70">{agent.model}</div>
+                      {providerWarning(agent.model) && (
+                        <div className="mt-0.5 text-[11px] text-[var(--hud-warning)]">⚠ {providerWarning(agent.model)}</div>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {TOGGLEABLE_STATUSES.map((s) => (

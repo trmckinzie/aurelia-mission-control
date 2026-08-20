@@ -48,4 +48,18 @@ describe("buildRunPrompt", () => {
   test("does not throw on an empty role", () => {
     assert.doesNotThrow(() => buildRunPrompt({ ...agent, role: "" }, goal));
   });
+
+  test("no upstream context block when there's no upstream", () => {
+    const { user } = buildRunPrompt(agent, goal);
+    assert.doesNotMatch(user, /Context from prior tasks/);
+  });
+
+  test("injects upstream task output when provided", () => {
+    const { user } = buildRunPrompt(agent, goal, [
+      { title: "Script Writing", output: "Here is the full script text." },
+    ]);
+    assert.match(user, /Context from prior tasks/);
+    assert.match(user, /Script Writing/);
+    assert.match(user, /Here is the full script text\./);
+  });
 });

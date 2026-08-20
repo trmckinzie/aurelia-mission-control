@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { providerIdForModel } from "@/lib/providers/types";
+import type { ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, Project, ProjectStatus } from "@/lib/types";
 
 const STATUS_STYLE: Record<ProjectStatus, string> = {
@@ -14,8 +16,6 @@ const STATUS_STYLE: Record<ProjectStatus, string> = {
   planned: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
   error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
 };
-
-const CLAUDE_CODE_PREFIX = "claude-code/";
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -32,6 +32,7 @@ export function FleetList() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [providers, setProviders] = useState<ProviderStatusResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [rawIdea, setRawIdea] = useState("");
@@ -40,15 +41,20 @@ export function FleetList() {
 
   async function load() {
     try {
-      const [projectsRes, agentsRes] = await Promise.all([
+      const [projectsRes, agentsRes, providersRes] = await Promise.all([
         fetch("/api/projects", { cache: "no-store" }),
         fetch("/api/agents", { cache: "no-store" }),
+        fetch("/api/providers", { cache: "no-store" }),
       ]);
       if (!projectsRes.ok || !agentsRes.ok) throw new Error("request failed");
       const projectsData: { projects: Project[] } = await projectsRes.json();
       const agentsData: { agents: Agent[] } = await agentsRes.json();
       setProjects(projectsData.projects);
       setAgents(agentsData.agents);
+      if (providersRes.ok) {
+        const providersData: { providers: ProviderStatusResult[] } = await providersRes.json();
+        setProviders(providersData.providers);
+      }
     } catch {
       setError("Could not load Fleet.");
     }
@@ -90,8 +96,10 @@ export function FleetList() {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
-  const claudeAgents = agents.filter((a) => a.model.startsWith(CLAUDE_CODE_PREFIX));
-  const otherAgents = agents.filter((a) => !a.model.startsWith(CLAUDE_CODE_PREFIX));
+  const claudeAgents = agents.filter((a) => providerIdForModel(a.model) === "claude-code");
+  const otherAgents = agents.filter((a) => providerIdForModel(a.model) !== "claude-code");
+  const claudeReady = providers.find((p) => p.id === "claude-code")?.status === "ready";
+  const claudeGroupLabel = claudeReady ? "Claude Code agents (recommended)" : "Claude Code agents (CLI unreachable)";
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
@@ -139,7 +147,7 @@ export function FleetList() {
                 Select an agent…
               </option>
               {claudeAgents.length > 0 && (
-                <optgroup label="Claude Code agents (recommended)">
+                <optgroup label={claudeGroupLabel}>
                   {claudeAgents.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}

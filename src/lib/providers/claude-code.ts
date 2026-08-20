@@ -78,10 +78,20 @@ export async function* streamClaudeCodeChat(model: string, system: string, user:
   // making the build tracer pull the whole project into this route's server output.
   const child = spawn(/* turbopackIgnore: true */ bin, args, { stdio: ["ignore", "pipe", "pipe"] });
 
-  await new Promise<void>((resolve, reject) => {
-    child.once("spawn", resolve);
-    child.once("error", reject);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new Error(
+        `Claude Code CLI binary "${bin}" was not found on PATH. If it's installed, set CLAUDE_CODE_BIN ` +
+          "in .env.local to its full path (see .env.local.example) and restart the dev server."
+      );
+    }
+    throw err;
+  }
 
   let timedOut = false;
   const timeout = setTimeout(() => {

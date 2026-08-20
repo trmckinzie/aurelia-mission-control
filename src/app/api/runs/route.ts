@@ -29,13 +29,27 @@ export const POST = withLocalGuard(async (request) => {
   if (!isValidId(agentId)) return jsonError("agentId is required", 400);
   if (!isValidId(goalId)) return jsonError("goalId is required", 400);
 
-  const [agents, goals] = await Promise.all([readCollection<Agent>("agents"), readCollection<Goal>("goals")]);
+  const [agents, goals, runs] = await Promise.all([
+    readCollection<Agent>("agents"),
+    readCollection<Goal>("goals"),
+    readCollection<Run>(COLLECTION),
+  ]);
   const agent = agents.find((a) => a.id === agentId);
   const goal = goals.find((g) => g.id === goalId);
   if (!agent) return jsonError("Agent not found", 404);
   if (!goal) return jsonError("Goal not found", 404);
 
-  const { system, user } = buildRunPrompt(agent, goal);
+  // A dependency without a completed run yet is just omitted — dispatch is
+  // never blocked server-side, the org chart is what informs the user.
+  const upstream = (goal.dependsOnGoalIds ?? [])
+    .map((depId) => {
+      const depGoal = goals.find((g) => g.id === depId);
+      const depRun = runs.find((r) => r.goalId === depId && r.status === "complete");
+      return depGoal && depRun ? { title: depGoal.title, output: depRun.response } : null;
+    })
+    .filter((u): u is { title: string; output: string } => u !== null);
+
+  const { system, user } = buildRunPrompt(agent, goal, upstream);
   const runId = randomUUID();
   const now = new Date().toISOString();
 

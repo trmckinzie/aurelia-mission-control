@@ -15,9 +15,14 @@ function parseTasks(value: unknown): ProposedTask[] | null {
   const tasks: ProposedTask[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") return null;
-    const { title, description, model } = item as Record<string, unknown>;
+    const { title, description, model, dependsOn } = item as Record<string, unknown>;
     if (!isNonEmptyString(title) || !isNonEmptyString(description) || !isNonEmptyString(model)) return null;
-    tasks.push({ title: title.trim(), description: description.trim(), model: model.trim() });
+    tasks.push({
+      title: title.trim(),
+      description: description.trim(),
+      model: model.trim(),
+      dependsOn: Array.isArray(dependsOn) ? dependsOn.filter(isNonEmptyString).map((d) => d.trim()) : [],
+    });
   }
   return tasks;
 }
@@ -26,8 +31,22 @@ function parseTasks(value: unknown): ProposedTask[] | null {
  * Materializes the (possibly user-edited) proposed task list into real
  * Agents and Goals — the point where the plan stops being a draft and
  * becomes the same Agent/Goal data every other page already knows how to
- * dispatch, archive, and delete. Reuses an existing agent on an exact
- * model match rather than creating a near-duplicate every time.
+ * dispatch, archive, and delete. Reuses an existing agent only on an exact
+ * match of *both* model and role — matching on model alone (an earlier
+ * version of this route did) let a "Quality Control" agent's role bleed
+ * into an unrelated "write a draft" task just because both happened to
+ * suggest the same model tag, confirmed live: the dispatched agent's own
+ * response flagged the role/goal mismatch it had been handed. Role is set
+ * from the task description, so in practice a fresh agent gets created per
+ * distinct task — correctness over deduplication, since agents are cheap
+ * to create and the Agent Registry already supports rename/delete cleanup.
+ *
+ * Two passes: create every Goal first, then resolve each task's
+ * `dependsOn` (sibling task titles) into `dependsOnGoalIds` — goal ids
+ * don't exist until the first pass is done, so a task can't reference a
+ * sibling's id before that sibling has one. A title with no match among
+ * the just-created goals (renamed/removed before materializing) is
+ * dropped rather than treated as an error.
  */
 export const POST = withLocalGuard<{ params: Promise<{ id: string }> }>(async (request, { params }) => {
   const { id } = await params;
@@ -48,7 +67,7 @@ export const POST = withLocalGuard<{ params: Promise<{ id: string }> }>(async (r
   for (const task of tasks) {
     let agent: Agent | undefined;
     await mutateCollection<Agent>("agents", (agents) => {
-      agent = agents.find((a) => a.model === task.model);
+      agent = agents.find((a) => a.model === task.model && a.role === task.description);
       if (agent) return agents;
       const now = new Date().toISOString();
       agent = {
@@ -78,6 +97,28 @@ export const POST = withLocalGuard<{ params: Promise<{ id: string }> }>(async (r
     };
     await mutateCollection<Goal>("goals", (goals) => [...goals, goal]);
     createdGoals.push(goal);
+  }
+
+  const goalIdByTitle = new Map(createdGoals.map((g) => [g.title, g.id]));
+  const dependsOnByGoalId = new Map(
+    tasks.map((task, i) => [
+      createdGoals[i].id,
+      (task.dependsOn ?? []).map((title) => goalIdByTitle.get(title)).filter((depId): depId is string => Boolean(depId)),
+    ])
+  );
+  if ([...dependsOnByGoalId.values()].some((deps) => deps.length > 0)) {
+    await mutateCollection<Goal>("goals", (goals) =>
+      goals.map((g) => {
+        const dependsOnGoalIds = dependsOnByGoalId.get(g.id);
+        return dependsOnGoalIds && dependsOnGoalIds.length > 0
+          ? { ...g, dependsOnGoalIds, updatedAt: new Date().toISOString() }
+          : g;
+      })
+    );
+    createdGoals.forEach((g) => {
+      const dependsOnGoalIds = dependsOnByGoalId.get(g.id);
+      if (dependsOnGoalIds && dependsOnGoalIds.length > 0) g.dependsOnGoalIds = dependsOnGoalIds;
+    });
   }
 
   await mutateCollection<Project>(COLLECTION, (projects) =>
