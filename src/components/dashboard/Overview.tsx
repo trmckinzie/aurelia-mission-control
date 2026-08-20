@@ -2,11 +2,19 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Bot, History, Plus, Send, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Agent, AgentStatus, Goal, GoalStatus, Run, RunStatus } from "@/lib/types";
 
 const GOAL_STATUSES: GoalStatus[] = ["not-started", "in-progress", "blocked", "done"];
+const GOAL_STATUS_LABEL: Record<GoalStatus, string> = {
+  "not-started": "Not Started",
+  "in-progress": "In Progress",
+  blocked: "Blocked",
+  done: "Done",
+};
 const GOAL_STATUS_STYLE: Record<GoalStatus, string> = {
   "not-started": "border-[var(--border)] text-muted-foreground",
   "in-progress": "border-[var(--hud-positive)] text-[var(--hud-positive)]",
@@ -15,6 +23,13 @@ const GOAL_STATUS_STYLE: Record<GoalStatus, string> = {
 };
 
 const AGENT_STATUSES: AgentStatus[] = ["defined", "idle", "active", "paused", "error"];
+const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
+  defined: "Defined",
+  idle: "Idle",
+  active: "Active",
+  paused: "Paused",
+  error: "Error",
+};
 const AGENT_STATUS_STYLE: Record<AgentStatus, string> = {
   defined: "border-[var(--border)] text-muted-foreground",
   idle: "border-[var(--border)] text-muted-foreground",
@@ -23,6 +38,11 @@ const AGENT_STATUS_STYLE: Record<AgentStatus, string> = {
   error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
 };
 
+const RUN_STATUS_LABEL: Record<RunStatus, string> = {
+  running: "Running",
+  complete: "Complete",
+  error: "Error",
+};
 const RUN_STATUS_STYLE: Record<RunStatus, string> = {
   running: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
   complete: "border-[var(--primary)] text-[var(--primary)]",
@@ -89,49 +109,72 @@ export function Overview() {
   const isFirstRun = agents.length === 0 && goals.length === 0;
   const recentRuns = runs.slice(0, RECENT_RUNS_LIMIT);
 
+  // A run's goal or agent can be deleted after the fact (Runs deliberately
+  // outlive both — see Run's doc comment in src/lib/types.ts) — only link
+  // to a specific dispatch context when it still actually exists, otherwise
+  // the Runs page silently falls back to whatever's first in the picker.
+  const goalIds = new Set(goals.map((g) => g.id));
+  const agentIds = new Set(agents.map((a) => a.id));
+  function runHref(run: Run): string {
+    if (!goalIds.has(run.goalId) || !agentIds.has(run.agentId)) return "/runs";
+    return `/runs?goalId=${run.goalId}&agentId=${run.agentId}`;
+  }
+
   return (
     <div className="flex max-w-4xl flex-col gap-6">
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Mission Overview</h1>
-        <p className="text-sm text-muted-foreground">Real, current state of your agents, goals, and dispatches.</p>
+        <p className="text-sm text-muted-foreground">
+          The current state of your agents, goals, and dispatches — at a glance.
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Link
-          href="/goals"
-          className="border border-[var(--border)] bg-card px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-foreground/90 hover:border-[var(--primary)] hover:text-[var(--primary)]"
-        >
-          + New Goal
+        <Link href="/goals" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Plus className="size-3.5" />
+          New Goal
         </Link>
-        <Link
-          href="/agents"
-          className="border border-[var(--border)] bg-card px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-foreground/90 hover:border-[var(--primary)] hover:text-[var(--primary)]"
-        >
-          + New Agent
+        <Link href="/agents" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Plus className="size-3.5" />
+          New Agent
         </Link>
-        <Link
-          href="/runs"
-          className="border border-[var(--border)] bg-card px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-[var(--primary)] hover:underline"
-        >
-          Dispatch →
+        <Link href="/runs" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Send className="size-3.5" />
+          Dispatch an Agent
         </Link>
       </div>
 
       {isFirstRun ? (
         <div className="border border-[var(--border)] bg-card p-5">
-          <h2 className="font-heading text-sm font-semibold text-foreground mb-2">Getting started</h2>
-          <ol className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-            <li>
-              1. <Link href="/agents" className="text-[var(--primary)] hover:underline">Define an agent</Link> —
-              give it a name, a role, and a model (Ollama or the Claude Code CLI).
+          <h2 className="font-heading text-sm font-semibold text-foreground mb-1">Getting started</h2>
+          <p className="mb-3 text-sm text-muted-foreground">Three steps to your first real dispatch:</p>
+          <ol className="flex flex-col gap-2 text-sm text-muted-foreground">
+            <li className="flex gap-2">
+              <span className="font-mono text-[var(--primary)]">1.</span>
+              <span>
+                <Link href="/agents" className="font-medium text-[var(--primary)] hover:underline">
+                  Define an agent
+                </Link>{" "}
+                — give it a name, a role, and a model (Ollama or the Claude Code CLI).
+              </span>
             </li>
-            <li>
-              2. <Link href="/goals" className="text-[var(--primary)] hover:underline">Create a goal</Link> and
-              assign the agent to it.
+            <li className="flex gap-2">
+              <span className="font-mono text-[var(--primary)]">2.</span>
+              <span>
+                <Link href="/goals" className="font-medium text-[var(--primary)] hover:underline">
+                  Create a goal
+                </Link>{" "}
+                and assign the agent to it.
+              </span>
             </li>
-            <li>
-              3. <Link href="/runs" className="text-[var(--primary)] hover:underline">Dispatch</Link> the goal to
-              the agent and watch it respond live.
+            <li className="flex gap-2">
+              <span className="font-mono text-[var(--primary)]">3.</span>
+              <span>
+                <Link href="/runs" className="font-medium text-[var(--primary)] hover:underline">
+                  Dispatch
+                </Link>{" "}
+                the goal to the agent and watch it respond live.
+              </span>
             </li>
           </ol>
         </div>
@@ -139,14 +182,19 @@ export function Overview() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Card size="sm">
             <CardHeader>
-              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <CardTitle className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                <Target className="size-3.5" />
                 Goals ({goals.length})
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-1.5">
+            <CardContent className="flex flex-col gap-2">
               {goals.length === 0 ? (
-                <p className="text-xs text-muted-foreground/70">
-                  No goals yet — <Link href="/goals" className="text-[var(--primary)] hover:underline">create one</Link>.
+                <p className="text-sm text-muted-foreground">
+                  No goals yet —{" "}
+                  <Link href="/goals" className="text-[var(--primary)] hover:underline">
+                    create one
+                  </Link>
+                  .
                 </p>
               ) : (
                 GOAL_STATUSES.map((s) => {
@@ -155,7 +203,7 @@ export function Overview() {
                   return (
                     <div key={s} className="flex items-center justify-between">
                       <Badge variant="outline" className={GOAL_STATUS_STYLE[s]}>
-                        {s}
+                        {GOAL_STATUS_LABEL[s]}
                       </Badge>
                       <span className="font-mono text-sm tabular-nums text-foreground/90">{count}</span>
                     </div>
@@ -164,23 +212,28 @@ export function Overview() {
               )}
               <Link
                 href="/goals"
-                className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--primary)] hover:underline"
+                className="mt-1 text-xs font-medium text-[var(--primary)] hover:underline"
               >
-                View Goals →
+                View all goals →
               </Link>
             </CardContent>
           </Card>
 
           <Card size="sm">
             <CardHeader>
-              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <CardTitle className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                <Bot className="size-3.5" />
                 Agents ({agents.length})
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-1.5">
+            <CardContent className="flex flex-col gap-2">
               {agents.length === 0 ? (
-                <p className="text-xs text-muted-foreground/70">
-                  No agents yet — <Link href="/agents" className="text-[var(--primary)] hover:underline">define one</Link>.
+                <p className="text-sm text-muted-foreground">
+                  No agents yet —{" "}
+                  <Link href="/agents" className="text-[var(--primary)] hover:underline">
+                    define one
+                  </Link>
+                  .
                 </p>
               ) : (
                 AGENT_STATUSES.map((s) => {
@@ -189,7 +242,7 @@ export function Overview() {
                   return (
                     <div key={s} className="flex items-center justify-between">
                       <Badge variant="outline" className={AGENT_STATUS_STYLE[s]}>
-                        {s}
+                        {AGENT_STATUS_LABEL[s]}
                       </Badge>
                       <span className="font-mono text-sm tabular-nums text-foreground/90">{count}</span>
                     </div>
@@ -198,9 +251,9 @@ export function Overview() {
               )}
               <Link
                 href="/agents"
-                className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--primary)] hover:underline"
+                className="mt-1 text-xs font-medium text-[var(--primary)] hover:underline"
               >
-                View Agents →
+                View all agents →
               </Link>
             </CardContent>
           </Card>
@@ -210,31 +263,40 @@ export function Overview() {
       {!isFirstRun && (
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Recent Runs</h2>
-            <Link href="/runs" className="font-mono text-[10px] uppercase tracking-widest text-[var(--primary)] hover:underline">
+            <h2 className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <History className="size-3.5" />
+              Recent Runs
+            </h2>
+            <Link href="/runs" className="text-xs font-medium text-[var(--primary)] hover:underline">
               View all →
             </Link>
           </div>
           {recentRuns.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No runs yet — <Link href="/runs" className="text-[var(--primary)] hover:underline">dispatch an agent</Link> to get started.
+              No runs yet —{" "}
+              <Link href="/runs" className="text-[var(--primary)] hover:underline">
+                dispatch an agent
+              </Link>{" "}
+              to get started.
             </p>
           ) : (
             <div className="flex flex-col gap-1.5">
               {recentRuns.map((run) => (
                 <Link
                   key={run.id}
-                  href="/runs"
-                  className="flex items-center gap-2 border border-[var(--border)] bg-card px-3 py-2 hover:border-[var(--primary)]/50"
+                  href={runHref(run)}
+                  className="flex items-center gap-3 border border-[var(--border)] bg-card px-3 py-2.5 hover:border-[var(--primary)]/50"
                 >
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/90">
-                    {run.agentName} <span className="text-muted-foreground/50">→</span> {run.goalTitle}
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground/90">
+                    <span className="font-medium">{run.agentName}</span>
+                    <span className="mx-1.5 text-muted-foreground/50">→</span>
+                    {run.goalTitle}
                   </span>
-                  <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground/70 sm:inline">
+                  <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground/70 sm:inline">
                     {timeAgo(run.createdAt)}
                   </span>
                   <Badge variant="outline" className={RUN_STATUS_STYLE[run.status]}>
-                    {run.status}
+                    {RUN_STATUS_LABEL[run.status]}
                   </Badge>
                 </Link>
               ))}
