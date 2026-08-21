@@ -6,14 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/dashboard/MarkdownContent";
 import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
+import { RUN_STATUS, isDispatchable } from "@/lib/status";
 import type { ProviderStatusResult } from "@/lib/providers/types";
 import type { Agent, Goal, RunStatus } from "@/lib/types";
-
-const STATUS_STYLE: Record<RunStatus, string> = {
-  running: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  complete: "border-[var(--primary)] text-[var(--primary)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
 
 interface RunMeta {
   agentName: string;
@@ -149,8 +144,12 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
 
   const displayStatus: RunStatus = status === "idle" ? "running" : status;
   const selectedGoal = goals.find((g) => g.id === goalId);
-  const assignedAgents = selectedGoal ? agents.filter((a) => selectedGoal.agentIds.includes(a.id)) : [];
-  const otherAgents = selectedGoal ? agents.filter((a) => !selectedGoal.agentIds.includes(a.id)) : agents;
+  // Paused agents are benched — the server refuses them, so don't offer them here either.
+  const dispatchable = agents.filter(isDispatchable);
+  const assignedAgents = selectedGoal ? dispatchable.filter((a) => selectedGoal.agentIds.includes(a.id)) : [];
+  const otherAgents = selectedGoal
+    ? dispatchable.filter((a) => !selectedGoal.agentIds.includes(a.id))
+    : dispatchable;
 
   const selectedAgent = agents.find((a) => a.id === agentId);
   const selectedAgentProviderStatus = selectedAgent ? agentProviderStatus(selectedAgent.model, providers) : "unknown";
@@ -242,8 +241,8 @@ export function DispatchPanel({ initialGoalId, initialAgentId, onDispatched }: D
               <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
                 {(elapsedMs / 1000).toFixed(1)}s
               </span>
-              <Badge variant="outline" className={STATUS_STYLE[displayStatus]}>
-                {status}
+              <Badge variant="outline" className={RUN_STATUS[displayStatus].className}>
+                {RUN_STATUS[displayStatus].label}
               </Badge>
             </div>
           </div>

@@ -2,6 +2,7 @@ import { mutateCollection, readCollection } from "@/lib/store";
 import { isValidId, jsonError, withLocalGuard } from "@/lib/api-helpers";
 import { dispatchAgent } from "@/lib/runs";
 import { buildRefinePrompt, parseRefinedPlan } from "@/lib/projects";
+import { isDispatchable } from "@/lib/status";
 import type { Agent, Project } from "@/lib/types";
 
 const COLLECTION = "projects";
@@ -25,7 +26,11 @@ export const POST = withLocalGuard<{ params: Promise<{ id: string }> }>(async (_
   const orchestrator = agents.find((a) => a.id === project.orchestratorAgentId);
   if (!orchestrator) return jsonError("Orchestrator agent not found — it may have been deleted", 404);
 
-  const { system, user } = buildRefinePrompt(project.rawIdea);
+  // The orchestrator assigns work to the other agents, so it sees the roster
+  // minus itself and minus anything paused (paused means benched — it
+  // shouldn't be handed new work, here or in the dispatch pickers).
+  const roster = agents.filter((a) => a.id !== orchestrator.id && isDispatchable(a));
+  const { system, user } = buildRefinePrompt(project.rawIdea, roster);
 
   await mutateCollection<Project>(COLLECTION, (projects) =>
     projects.map((p) => (p.id === id ? { ...p, status: "refining", updatedAt: new Date().toISOString() } : p))

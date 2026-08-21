@@ -6,61 +6,14 @@ import { Bot, History, Plus, Send, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Agent, AgentStatus, Goal, GoalStatus, Run, RunStatus } from "@/lib/types";
+import { AGENT_STATUS, GOAL_STATUS, RUN_STATUS, deriveAgentStatus, deriveGoalStatus } from "@/lib/status";
+import { timeAgo } from "@/lib/format";
+import type { Agent, AgentStatus, Goal, GoalStatus, Run } from "@/lib/types";
 
 const GOAL_STATUSES: GoalStatus[] = ["not-started", "in-progress", "blocked", "done"];
-const GOAL_STATUS_LABEL: Record<GoalStatus, string> = {
-  "not-started": "Not Started",
-  "in-progress": "In Progress",
-  blocked: "Blocked",
-  done: "Done",
-};
-const GOAL_STATUS_STYLE: Record<GoalStatus, string> = {
-  "not-started": "border-[var(--border)] text-muted-foreground",
-  "in-progress": "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  blocked: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-  done: "border-[var(--primary)] text-[var(--primary)]",
-};
-
 const AGENT_STATUSES: AgentStatus[] = ["defined", "idle", "active", "paused", "error"];
-const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
-  defined: "Defined",
-  idle: "Idle",
-  active: "Active",
-  paused: "Paused",
-  error: "Error",
-};
-const AGENT_STATUS_STYLE: Record<AgentStatus, string> = {
-  defined: "border-[var(--border)] text-muted-foreground",
-  idle: "border-[var(--border)] text-muted-foreground",
-  active: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  paused: "border-[var(--hud-warning)] text-[var(--hud-warning)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
-
-const RUN_STATUS_LABEL: Record<RunStatus, string> = {
-  running: "Running",
-  complete: "Complete",
-  error: "Error",
-};
-const RUN_STATUS_STYLE: Record<RunStatus, string> = {
-  running: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  complete: "border-[var(--primary)] text-[var(--primary)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
 
 const RECENT_RUNS_LIMIT = 5;
-
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const sec = Math.max(0, Math.floor(ms / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
-}
 
 export function Overview() {
   const [goals, setGoals] = useState<Goal[] | null>(null);
@@ -198,12 +151,12 @@ export function Overview() {
                 </p>
               ) : (
                 GOAL_STATUSES.map((s) => {
-                  const count = goals.filter((g) => g.status === s).length;
+                  const count = goals.filter((g) => deriveGoalStatus(g, runs) === s).length;
                   if (count === 0) return null;
                   return (
                     <div key={s} className="flex items-center justify-between">
-                      <Badge variant="outline" className={GOAL_STATUS_STYLE[s]}>
-                        {GOAL_STATUS_LABEL[s]}
+                      <Badge variant="outline" className={GOAL_STATUS[s].className}>
+                        {GOAL_STATUS[s].label}
                       </Badge>
                       <span className="font-mono text-sm tabular-nums text-foreground/90">{count}</span>
                     </div>
@@ -237,12 +190,12 @@ export function Overview() {
                 </p>
               ) : (
                 AGENT_STATUSES.map((s) => {
-                  const count = agents.filter((a) => a.status === s).length;
+                  const count = agents.filter((a) => deriveAgentStatus(a, runs) === s).length;
                   if (count === 0) return null;
                   return (
                     <div key={s} className="flex items-center justify-between">
-                      <Badge variant="outline" className={AGENT_STATUS_STYLE[s]}>
-                        {AGENT_STATUS_LABEL[s]}
+                      <Badge variant="outline" className={AGENT_STATUS[s].className}>
+                        {AGENT_STATUS[s].label}
                       </Badge>
                       <span className="font-mono text-sm tabular-nums text-foreground/90">{count}</span>
                     </div>
@@ -295,8 +248,8 @@ export function Overview() {
                   <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground/70 sm:inline">
                     {timeAgo(run.createdAt)}
                   </span>
-                  <Badge variant="outline" className={RUN_STATUS_STYLE[run.status]}>
-                    {RUN_STATUS_LABEL[run.status]}
+                  <Badge variant="outline" className={RUN_STATUS[run.status].className}>
+                    {RUN_STATUS[run.status].label}
                   </Badge>
                 </Link>
               ))}

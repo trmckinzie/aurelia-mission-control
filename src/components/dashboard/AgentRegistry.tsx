@@ -6,29 +6,24 @@ import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/dashboard/ModelPicker";
 import { defaultModelValue, modelOptionGroups } from "@/lib/providers/catalog";
 import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
+import { AGENT_STATUS, AGENT_STATUS_HELP, deriveAgentStatus } from "@/lib/status";
 import type { ProviderStatusResult } from "@/lib/providers/types";
-import type { Agent, AgentStatus } from "@/lib/types";
+import type { Agent, AgentStatus, Run } from "@/lib/types";
 
 const EXAMPLE_AGENT = {
   name: "Research Assistant",
   role: "Gathers and fact-checks source material for a task before a writer or reviewer builds on it — cites where each claim comes from.",
 };
 
-const STATUS_STYLE: Record<AgentStatus, string> = {
-  defined: "border-[var(--border)] text-muted-foreground",
-  idle: "border-[var(--border)] text-muted-foreground",
-  active: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  paused: "border-[var(--hud-warning)] text-[var(--hud-warning)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
-
-const TOGGLEABLE_STATUSES: AgentStatus[] = ["idle", "active", "paused"];
+/** "active" is derived from live runs, not something you set — so the only manual choice is bench vs. available. */
+const TOGGLEABLE_STATUSES: AgentStatus[] = ["idle", "paused"];
 
 const EDIT_INPUT_CLASS =
   "border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]";
 
 export function AgentRegistry() {
   const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [runs, setRuns] = useState<Run[]>([]);
   const [providers, setProviders] = useState<ProviderStatusResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -44,13 +39,18 @@ export function AgentRegistry() {
 
   async function load() {
     try {
-      const [agentsRes, providersRes] = await Promise.all([
+      const [agentsRes, providersRes, runsRes] = await Promise.all([
         fetch("/api/agents", { cache: "no-store" }),
         fetch("/api/providers", { cache: "no-store" }),
+        fetch("/api/runs", { cache: "no-store" }),
       ]);
       if (!agentsRes.ok) throw new Error("request failed");
       const data: { agents: Agent[] } = await agentsRes.json();
       setAgents(data.agents);
+      if (runsRes.ok) {
+        const runsData: { runs: Run[] } = await runsRes.json();
+        setRuns(runsData.runs);
+      }
       let liveProviders: ProviderStatusResult[] = [];
       if (providersRes.ok) {
         const providersData: { providers: ProviderStatusResult[] } = await providersRes.json();
@@ -176,8 +176,9 @@ export function AgentRegistry() {
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Agent Registry</h1>
         <p className="text-sm text-muted-foreground">
-          Define an agent here, assign it to a goal, then dispatch it from the Runs page. Pick a model from the
-          list — it only offers <code className="font-mono">ollama/&lt;model&gt;</code> (Ollama) and{" "}
+          An agent is a reusable specialist — define it once by what it&apos;s good at, then assign it to any
+          number of goals. Pick a model from the list; it only offers{" "}
+          <code className="font-mono">ollama/&lt;model&gt;</code> (Ollama) and{" "}
           <code className="font-mono">claude-code/&lt;model&gt;</code> (Claude Code CLI) values that actually run,
           or use <span className="font-mono">Custom…</span> if you know what you&apos;re doing. New here? Click{" "}
           <span className="font-medium text-foreground">Insert example agent</span> below to see a real, working
@@ -222,6 +223,7 @@ export function AgentRegistry() {
         <div className="flex flex-col gap-2">
           {agents.map((agent) => {
             const isEditing = editingId === agent.id;
+            const liveStatus = deriveAgentStatus(agent, runs);
             return (
               <div key={agent.id} className="border border-[var(--border)] bg-card px-4 py-3">
                 {isEditing ? (
@@ -248,12 +250,21 @@ export function AgentRegistry() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-foreground">{agent.name}</span>
-                        <Badge variant="outline" className={STATUS_STYLE[agent.status]}>
-                          {agent.status}
+                        <Badge
+                          variant="outline"
+                          className={AGENT_STATUS[liveStatus].className}
+                          title={AGENT_STATUS_HELP[liveStatus]}
+                        >
+                          {AGENT_STATUS[liveStatus].label}
                         </Badge>
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">{agent.role}</div>
                       <div className="mt-0.5 font-mono text-[11px] text-muted-foreground/70">{agent.model}</div>
+                      {liveStatus === "paused" && (
+                        <div className="mt-0.5 text-[11px] text-[var(--hud-warning)]">
+                          Benched — excluded from dispatch and from the orchestrator&apos;s roster.
+                        </div>
+                      )}
                       {providerWarning(agent.model) && (
                         <div className="mt-0.5 text-[11px] text-[var(--hud-warning)]">⚠ {providerWarning(agent.model)}</div>
                       )}
@@ -265,13 +276,14 @@ export function AgentRegistry() {
                           type="button"
                           onClick={() => setStatus(agent.id, s)}
                           disabled={agent.status === s}
-                          className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
+                          title={AGENT_STATUS_HELP[s]}
+                          className={`border px-2 py-1 text-[10px] ${
                             agent.status === s
                               ? "border-[var(--primary)] text-[var(--primary)]"
                               : "border-[var(--border)] text-muted-foreground hover:text-foreground"
                           }`}
                         >
-                          {s}
+                          {s === "paused" ? "Pause" : "Available"}
                         </button>
                       ))}
                       <span className="mx-1 h-4 w-px bg-[var(--border)]" />

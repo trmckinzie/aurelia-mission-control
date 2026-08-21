@@ -6,27 +6,10 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { providerIdForModel } from "@/lib/providers/types";
+import { PROJECT_STATUS, isDispatchable } from "@/lib/status";
+import { timeAgo } from "@/lib/format";
 import type { ProviderStatusResult } from "@/lib/providers/types";
-import type { Agent, Project, ProjectStatus } from "@/lib/types";
-
-const STATUS_STYLE: Record<ProjectStatus, string> = {
-  draft: "border-[var(--border)] text-muted-foreground",
-  refining: "border-[var(--hud-warning)] text-[var(--hud-warning)]",
-  refined: "border-[var(--primary)] text-[var(--primary)]",
-  planned: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
-
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const sec = Math.max(0, Math.floor(ms / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
-}
+import type { Agent, Project } from "@/lib/types";
 
 export function FleetList() {
   const router = useRouter();
@@ -96,8 +79,10 @@ export function FleetList() {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
-  const claudeAgents = agents.filter((a) => providerIdForModel(a.model) === "claude-code");
-  const otherAgents = agents.filter((a) => providerIdForModel(a.model) !== "claude-code");
+  // A paused agent is benched — it shouldn't be picked to run a whole project.
+  const available = agents.filter(isDispatchable);
+  const claudeAgents = available.filter((a) => providerIdForModel(a.model) === "claude-code");
+  const otherAgents = available.filter((a) => providerIdForModel(a.model) !== "claude-code");
   const claudeReady = providers.find((p) => p.id === "claude-code")?.status === "ready";
   const claudeGroupLabel = claudeReady ? "Claude Code agents (recommended)" : "Claude Code agents (CLI unreachable)";
 
@@ -190,8 +175,8 @@ export function FleetList() {
               </div>
               <div className="flex shrink-0 items-center gap-2.5">
                 <span className="font-mono text-[10px] text-muted-foreground/70">{timeAgo(p.createdAt)}</span>
-                <Badge variant="outline" className={STATUS_STYLE[p.status]}>
-                  {p.status}
+                <Badge variant="outline" className={PROJECT_STATUS[p.status].className}>
+                  {PROJECT_STATUS[p.status].label}
                 </Badge>
               </div>
             </Link>

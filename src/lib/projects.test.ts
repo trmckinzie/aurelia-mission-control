@@ -2,6 +2,11 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { buildRefinePrompt, parseRefinedPlan } from "@/lib/projects";
 
+const ROSTER = [
+  { name: "Quality Reviewer", role: "Fact-checks other agents' output", model: "ollama/deepseek-r1:14b" },
+  { name: "Senior Editor", role: "Polishes long-form writing", model: "ollama/qwen2.5:14b" },
+];
+
 describe("buildRefinePrompt", () => {
   test("includes the raw idea in the user prompt", () => {
     const { user } = buildRefinePrompt("a 10-minute YouTube video about circadian rhythm");
@@ -14,6 +19,30 @@ describe("buildRefinePrompt", () => {
     assert.match(system, /"title"/);
     assert.match(system, /"tasks"/);
   });
+
+  test("lists each available agent by name, role, and model so assignment isn't a guess", () => {
+    const { system } = buildRefinePrompt("anything", ROSTER);
+    assert.match(system, /Quality Reviewer/);
+    assert.match(system, /Fact-checks other agents' output/);
+    assert.match(system, /ollama\/deepseek-r1:14b/);
+    assert.match(system, /Senior Editor/);
+  });
+
+  test("tells the orchestrator not to send every task to the same agent", () => {
+    const { system } = buildRefinePrompt("anything", ROSTER);
+    assert.match(system, /Do NOT assign every task to the same agent/);
+  });
+
+  test("asks for assignment by agent name, not by raw model tag", () => {
+    const { system } = buildRefinePrompt("anything", ROSTER);
+    assert.match(system, /"assignee"/);
+    assert.doesNotMatch(system, /"model": string/);
+  });
+
+  test("instructs everything unassigned when no agents exist", () => {
+    const { system } = buildRefinePrompt("anything", []);
+    assert.match(system, /No specialist agents are defined yet/);
+  });
 });
 
 const VALID_PLAN_JSON = JSON.stringify({
@@ -21,8 +50,8 @@ const VALID_PLAN_JSON = JSON.stringify({
   brief: "# Hook\n...",
   assumptions: ["Assuming a general audience, not athletes specifically."],
   tasks: [
-    { title: "Write hook + title options", description: "3 title/hook pairs", model: "claude-code/sonnet" },
-    { title: "Draft YouTube description", description: "SEO-friendly description + tags", model: "ollama/llama3.1" },
+    { title: "Write hook + title options", description: "3 title/hook pairs", assignee: "Senior Editor" },
+    { title: "Draft YouTube description", description: "SEO-friendly description + tags", assignee: null },
   ],
 });
 
@@ -47,7 +76,7 @@ describe("parseRefinedPlan", () => {
   });
 
   test("returns null when title or brief is missing", () => {
-    const missingTitle = JSON.stringify({ brief: "x", tasks: [{ title: "a", description: "b", model: "ollama/x" }] });
+    const missingTitle = JSON.stringify({ brief: "x", tasks: [{ title: "a", description: "b" }] });
     assert.equal(parseRefinedPlan(missingTitle), null);
   });
 
@@ -56,14 +85,31 @@ describe("parseRefinedPlan", () => {
       title: "T",
       brief: "B",
       tasks: [
-        { title: "Good task", description: "desc", model: "ollama/x" },
-        { title: "Missing model" },
+        { title: "Good task", description: "desc", assignee: "Senior Editor" },
+        { title: "Missing description" },
       ],
     });
     const plan = parseRefinedPlan(withBadTask);
     assert.ok(plan);
     assert.equal(plan?.tasks.length, 1);
     assert.equal(plan?.tasks[0].title, "Good task");
+  });
+
+  test("parses assignee per task", () => {
+    const plan = parseRefinedPlan(VALID_PLAN_JSON);
+    assert.equal(plan?.tasks[0].assignee, "Senior Editor");
+    assert.equal(plan?.tasks[1].assignee, null);
+  });
+
+  test("keeps an unassigned task rather than discarding real work", () => {
+    const allUnassigned = JSON.stringify({
+      title: "T",
+      brief: "B",
+      tasks: [{ title: "a", description: "b" }],
+    });
+    const plan = parseRefinedPlan(allUnassigned);
+    assert.equal(plan?.tasks.length, 1);
+    assert.equal(plan?.tasks[0].assignee, null);
   });
 
   test("returns null when no tasks survive filtering", () => {
@@ -75,7 +121,7 @@ describe("parseRefinedPlan", () => {
     const noAssumptions = JSON.stringify({
       title: "T",
       brief: "B",
-      tasks: [{ title: "a", description: "b", model: "ollama/x" }],
+      tasks: [{ title: "a", description: "b" }],
     });
     const plan = parseRefinedPlan(noAssumptions);
     assert.deepEqual(plan?.assumptions, []);
@@ -86,8 +132,8 @@ describe("parseRefinedPlan", () => {
       title: "T",
       brief: "B",
       tasks: [
-        { title: "Script Writing", description: "write it", model: "ollama/x" },
-        { title: "Quality Control", description: "review it", model: "claude-code/sonnet", dependsOn: ["Script Writing"] },
+        { title: "Script Writing", description: "write it" },
+        { title: "Quality Control", description: "review it", dependsOn: ["Script Writing"] },
       ],
     });
     const plan = parseRefinedPlan(withDeps);
@@ -100,8 +146,8 @@ describe("parseRefinedPlan", () => {
       title: "T",
       brief: "B",
       tasks: [
-        { title: "a", description: "b", model: "ollama/x" },
-        { title: "c", description: "d", model: "ollama/x", dependsOn: ["a", 5, null, "  "] },
+        { title: "a", description: "b" },
+        { title: "c", description: "d", dependsOn: ["a", 5, null, "  "] },
       ],
     });
     const plan = parseRefinedPlan(messyDeps);

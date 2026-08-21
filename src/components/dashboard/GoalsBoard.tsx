@@ -4,7 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { Agent, Goal, GoalDomain, GoalPriority, GoalStatus } from "@/lib/types";
+import { GOAL_STATUS, deriveGoalStatus, isDispatchable } from "@/lib/status";
+import type { Agent, Goal, GoalDomain, GoalPriority, GoalStatus, Run } from "@/lib/types";
 
 const DOMAINS: { key: GoalDomain; label: string }[] = [
   { key: "productivity", label: "Personal Productivity" },
@@ -13,13 +14,6 @@ const DOMAINS: { key: GoalDomain; label: string }[] = [
 ];
 
 const STATUSES: GoalStatus[] = ["not-started", "in-progress", "blocked", "done"];
-
-const STATUS_STYLE: Record<GoalStatus, string> = {
-  "not-started": "border-[var(--border)] text-muted-foreground",
-  "in-progress": "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  blocked: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-  done: "border-[var(--primary)] text-[var(--primary)]",
-};
 
 const PRIORITY_STYLE: Record<GoalPriority, string> = {
   low: "border-[var(--border)] text-muted-foreground",
@@ -36,6 +30,7 @@ const NEXT_PRIORITY: Record<GoalPriority, GoalPriority> = {
 export function GoalsBoard() {
   const [goals, setGoals] = useState<Goal[] | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -46,15 +41,20 @@ export function GoalsBoard() {
 
   async function load() {
     try {
-      const [goalsRes, agentsRes] = await Promise.all([
+      const [goalsRes, agentsRes, runsRes] = await Promise.all([
         fetch("/api/goals", { cache: "no-store" }),
         fetch("/api/agents", { cache: "no-store" }),
+        fetch("/api/runs", { cache: "no-store" }),
       ]);
       if (!goalsRes.ok || !agentsRes.ok) throw new Error("request failed");
       const goalsData: { goals: Goal[] } = await goalsRes.json();
       const agentsData: { agents: Agent[] } = await agentsRes.json();
       setGoals(goalsData.goals);
       setAgents(agentsData.agents);
+      if (runsRes.ok) {
+        const runsData: { runs: Run[] } = await runsRes.json();
+        setRuns(runsData.runs);
+      }
     } catch {
       setError("Could not load goals.");
     }
@@ -131,8 +131,8 @@ export function GoalsBoard() {
       <div>
         <h1 className="font-heading text-lg font-semibold text-foreground mb-1">Goals</h1>
         <p className="text-sm text-muted-foreground">
-          What agents are working toward, grouped by the three things this dashboard tracks. Assign an
-          agent, then dispatch the goal to it from the Runs page.
+          A goal is one specific deliverable. Assign it to an agent — the reusable specialist that does the
+          work — then send it from the Dispatch page. Status updates itself as runs complete.
         </p>
       </div>
 
@@ -144,11 +144,12 @@ export function GoalsBoard() {
             placeholder="Title (e.g. Ship weekly newsletter)"
             className="border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]"
           />
-          <input
+          <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Description (optional)"
-            className="border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]"
+            placeholder="What should the finished result be? (optional, but agents work better with detail)"
+            rows={2}
+            className="border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)] sm:row-span-2"
           />
           <select
             value={domain}
@@ -194,7 +195,9 @@ export function GoalsBoard() {
                 {domainGoals.length === 0 && (
                   <p className="text-xs text-muted-foreground/70">No goals yet.</p>
                 )}
-                {domainGoals.map((goal) => (
+                {domainGoals.map((goal) => {
+                  const liveStatus = deriveGoalStatus(goal, runs);
+                  return (
                   <div key={goal.id} className="flex flex-col gap-2 border border-[var(--border)] bg-card p-3">
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-sm font-semibold text-foreground">{goal.title}</span>
@@ -221,23 +224,42 @@ export function GoalsBoard() {
                     {goal.description && (
                       <p className="text-xs text-muted-foreground">{goal.description}</p>
                     )}
+                    {goal.projectId && (
+                      <Link
+                        href={`/fleet/${goal.projectId}`}
+                        className="self-start text-[11px] text-[var(--primary)] hover:underline"
+                      >
+                        From a Fleet project →
+                      </Link>
+                    )}
 
-                    <div className="flex flex-wrap gap-1.5">
-                      {STATUSES.map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => patchGoal(goal.id, { status: s })}
-                          disabled={goal.status === s}
-                          className={`border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide ${
-                            goal.status === s
-                              ? STATUS_STYLE[s]
-                              : "border-[var(--border)] text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {s}
-                        </button>
-                      ))}
+                    <div>
+                      <div className="mb-1 flex items-center gap-1.5">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
+                          Status
+                        </span>
+                        <Badge variant="outline" className={GOAL_STATUS[liveStatus].className}>
+                          {GOAL_STATUS[liveStatus].label}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {STATUSES.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => patchGoal(goal.id, { status: s })}
+                            disabled={liveStatus === s}
+                            title={`Mark this goal ${GOAL_STATUS[s].label}`}
+                            className={`border px-1.5 py-0.5 text-[10px] ${
+                              liveStatus === s
+                                ? GOAL_STATUS[s].className
+                                : "border-[var(--border)] text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {GOAL_STATUS[s].label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="mt-1 border-t border-[var(--border)] pt-2">
@@ -248,7 +270,7 @@ export function GoalsBoard() {
                         {goal.agentIds.length > 0 && (
                           <Link
                             href={`/runs?goalId=${goal.id}&agentId=${goal.agentIds[0]}`}
-                            className="font-mono text-[10px] uppercase tracking-widest text-[var(--primary)] hover:underline"
+                            className="text-[11px] font-medium text-[var(--primary)] hover:underline"
                           >
                             Dispatch →
                           </Link>
@@ -259,29 +281,38 @@ export function GoalsBoard() {
                           No agents defined yet — add some on the Agents page.
                         </p>
                       ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {agents.map((agent) => {
-                            const assigned = goal.agentIds.includes(agent.id);
-                            return (
-                              <button
-                                key={agent.id}
-                                type="button"
-                                onClick={() => toggleAgent(goal, agent.id)}
-                                className={`border px-1.5 py-0.5 font-mono text-[10px] ${
-                                  assigned
-                                    ? "border-[var(--primary)] text-[var(--primary)]"
-                                    : "border-[var(--border)] text-muted-foreground/70 hover:text-foreground"
-                                }`}
-                              >
-                                {agent.name}
-                              </button>
-                            );
-                          })}
-                        </div>
+                        <>
+                          {goal.agentIds.length === 0 && (
+                            <p className="mb-1 text-[11px] text-[var(--hud-warning)]">
+                              Unassigned — pick an agent below to dispatch this.
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-1.5">
+                            {agents.filter(isDispatchable).map((agent) => {
+                              const assigned = goal.agentIds.includes(agent.id);
+                              return (
+                                <button
+                                  key={agent.id}
+                                  type="button"
+                                  onClick={() => toggleAgent(goal, agent.id)}
+                                  title={`${agent.role} · ${agent.model}`}
+                                  className={`border px-1.5 py-0.5 text-[10px] ${
+                                    assigned
+                                      ? "border-[var(--primary)] text-[var(--primary)]"
+                                      : "border-[var(--border)] text-muted-foreground/70 hover:text-foreground"
+                                  }`}
+                                >
+                                  {agent.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             );
           })}

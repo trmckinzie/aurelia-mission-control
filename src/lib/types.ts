@@ -63,12 +63,22 @@ export interface Run {
 
 export type ProjectStatus = "draft" | "refining" | "refined" | "planned" | "error";
 
-/** One task proposed by the orchestrator's refinement pass — not yet a real Agent/Goal. */
+/**
+ * One task proposed by the orchestrator's refinement pass — not yet a real
+ * Goal. A task is *work*, so it names an existing specialist Agent to do it
+ * rather than describing a new one: an Agent is a reusable "who" (Code
+ * Specialist, kept across projects), a Goal is one project's "what". An
+ * earlier version built both from this same title/description pair, which
+ * made every agent an exact clone of its goal and filled the registry with
+ * single-use, task-named agents.
+ */
 export interface ProposedTask {
   title: string;
   description: string;
-  /** Same shape as Agent.model, e.g. "ollama/hermes3" or "claude-code/sonnet". */
-  model: string;
+  /** Name of an existing Agent to do this work, resolved to Goal.agentIds at materialization. Null/unmatched means unassigned — the user picks during review; nothing is auto-created. */
+  assignee?: string | null;
+  /** Only meaningful for an unassigned task: the model the orchestrator would want if a new agent were made for it. Not used to create anything. */
+  model?: string;
   /** Titles of sibling tasks in the same proposed plan this one needs the output of (e.g. a review task depending on what it reviews). Resolved to Goal.dependsOnGoalIds at materialization. */
   dependsOn?: string[];
 }

@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { mutateCollection, readCollection } from "@/lib/store";
 import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
 import { buildRunPrompt, dispatchAgent, resolveUpstream } from "@/lib/runs";
-import type { Agent, Goal, Project, Run } from "@/lib/types";
+import { isDispatchable } from "@/lib/status";
+import type { Agent, AgentStatus, Goal, GoalStatus, Project, Run } from "@/lib/types";
 
 const COLLECTION = "runs";
 
@@ -39,6 +40,9 @@ export const POST = withLocalGuard(async (request) => {
   const goal = goals.find((g) => g.id === goalId);
   if (!agent) return jsonError("Agent not found", 404);
   if (!goal) return jsonError("Goal not found", 404);
+  if (!isDispatchable(agent)) {
+    return jsonError(`"${agent.name}" is paused — resume it on the Agents page to dispatch to it.`, 409);
+  }
 
   const upstream = resolveUpstream(goal, goals, runs);
 
@@ -67,6 +71,27 @@ export const POST = withLocalGuard(async (request) => {
   };
   await mutateCollection<Run>(COLLECTION, (runs) => [...runs, initialRun]);
 
+  /**
+   * Goal and agent status used to be write-only fields nothing ever
+   * advanced — a goal whose every task had finished still read "Not
+   * Started" on the Goals page. Dispatch now moves both, so the stored
+   * value reflects reality; a user can still override either afterward.
+   */
+  async function setLifecycleStatus(goalStatus: GoalStatus, agentStatus: AgentStatus) {
+    const updatedAt = new Date().toISOString();
+    await Promise.all([
+      mutateCollection<Goal>("goals", (goals) =>
+        goals.map((g) => (g.id === goal!.id ? { ...g, status: goalStatus, updatedAt } : g))
+      ),
+      mutateCollection<Agent>("agents", (agents) =>
+        // Never clobber a pause set mid-run — that's a deliberate user action.
+        agents.map((a) => (a.id === agent!.id && a.status !== "paused" ? { ...a, status: agentStatus, updatedAt } : a))
+      ),
+    ]);
+  }
+
+  await setLifecycleStatus("in-progress", "active");
+
   const encoder = new TextEncoder();
   let fullResponse = "";
 
@@ -82,6 +107,7 @@ export const POST = withLocalGuard(async (request) => {
             r.id === runId ? { ...r, status: "complete", response: fullResponse, updatedAt: new Date().toISOString() } : r
           )
         );
+        await setLifecycleStatus("done", "idle");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         await mutateCollection<Run>(COLLECTION, (runs) =>
@@ -91,6 +117,7 @@ export const POST = withLocalGuard(async (request) => {
               : r
           )
         );
+        await setLifecycleStatus("blocked", "error");
         controller.enqueue(encoder.encode(`\n\n[error: ${message}]`));
       } finally {
         controller.close();

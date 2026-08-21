@@ -5,13 +5,8 @@ import { ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MarkdownContent } from "@/components/dashboard/MarkdownContent";
-import type { Run, RunStatus } from "@/lib/types";
-
-const STATUS_STYLE: Record<RunStatus, string> = {
-  running: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  complete: "border-[var(--primary)] text-[var(--primary)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
+import { RUN_STATUS } from "@/lib/status";
+import type { Run } from "@/lib/types";
 
 const POLL_MS = 5000;
 
@@ -40,8 +35,8 @@ function RunEntry({ run, onArchiveToggle, onDelete }: RunEntryProps) {
           <span className="hidden font-mono text-[10px] text-muted-foreground/70 sm:inline">
             {formatTime(run.createdAt)}
           </span>
-          <Badge variant="outline" className={STATUS_STYLE[run.status]}>
-            {run.status}
+          <Badge variant="outline" className={RUN_STATUS[run.status].className}>
+            {RUN_STATUS[run.status].label}
           </Badge>
           <button
             type="button"

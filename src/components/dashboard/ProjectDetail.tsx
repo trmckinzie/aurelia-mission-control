@@ -6,29 +6,15 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/dashboard/MarkdownContent";
-import { modelOptionGroups } from "@/lib/providers/catalog";
+import { PROJECT_STATUS, RUN_STATUS, isDispatchable, type StatusDisplay } from "@/lib/status";
 import { agentProviderStatus, providerIdForModel } from "@/lib/providers/types";
 import type { ProviderStatus, ProviderStatusResult } from "@/lib/providers/types";
-import type { Agent, Goal, Project, ProjectStatus, ProposedTask, Run, RunStatus } from "@/lib/types";
-
-const PROJECT_STATUS_STYLE: Record<ProjectStatus, string> = {
-  draft: "border-[var(--border)] text-muted-foreground",
-  refining: "border-[var(--hud-warning)] text-[var(--hud-warning)]",
-  refined: "border-[var(--primary)] text-[var(--primary)]",
-  planned: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
-
-const RUN_STATUS_STYLE: Record<RunStatus, string> = {
-  running: "border-[var(--hud-positive)] text-[var(--hud-positive)]",
-  complete: "border-[var(--primary)] text-[var(--primary)]",
-  error: "border-[var(--hud-critical)] text-[var(--hud-critical)]",
-};
+import type { Agent, Goal, Project, ProposedTask, Run } from "@/lib/types";
 
 const TASK_INPUT_CLASS =
   "border border-[var(--border)] bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:border-[var(--primary)]";
 
-const CUSTOM_MODEL_VALUE = "__custom__";
+const UNASSIGNED_VALUE = "__unassigned__";
 
 interface TaskCardProps {
   goal: Goal;
@@ -41,12 +27,11 @@ interface TaskCardProps {
 
 function TaskCard({ goal, agent, latestRun, providerStatus, dependsOnTitles, dependenciesReady }: TaskCardProps) {
   const href = `/runs?goalId=${goal.id}${agent ? `&agentId=${agent.id}` : ""}`;
-  const statusLabel = latestRun ? latestRun.status : dependenciesReady ? "not dispatched" : "waiting on deps";
-  const statusStyle = latestRun
-    ? RUN_STATUS_STYLE[latestRun.status]
+  const status: StatusDisplay = latestRun
+    ? RUN_STATUS[latestRun.status]
     : dependenciesReady
-      ? "border-[var(--border)] text-muted-foreground"
-      : "border-[var(--hud-warning)] text-[var(--hud-warning)]";
+      ? { label: "Ready to Dispatch", className: "border-[var(--border)] text-muted-foreground" }
+      : { label: "Waiting on Deps", className: "border-[var(--hud-warning)] text-[var(--hud-warning)]" };
 
   return (
     <Link
@@ -54,14 +39,18 @@ function TaskCard({ goal, agent, latestRun, providerStatus, dependsOnTitles, dep
       className="flex w-56 flex-col gap-1.5 border border-[var(--border)] bg-card px-3 py-2.5 hover:border-[var(--primary)]/50"
     >
       <span className="truncate text-sm font-semibold text-foreground">{goal.title}</span>
-      <span className="truncate text-xs text-muted-foreground">{agent?.name ?? "Unassigned"}</span>
+      {agent ? (
+        <span className="truncate text-xs text-muted-foreground">{agent.name}</span>
+      ) : (
+        <span className="truncate text-xs text-[var(--hud-warning)]">Unassigned — pick an agent</span>
+      )}
       {dependsOnTitles.length > 0 && (
         <span className="truncate text-[10px] text-muted-foreground/70">Depends on: {dependsOnTitles.join(", ")}</span>
       )}
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-mono text-[10px] text-muted-foreground/70">{agent?.model}</span>
-        <Badge variant="outline" className={statusStyle}>
-          {statusLabel}
+        <Badge variant="outline" className={status.className}>
+          {status.label}
         </Badge>
       </div>
       {providerStatus !== "ready" && providerStatus !== "unknown" && (
@@ -85,7 +74,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [refineError, setRefineError] = useState<string | null>(null);
 
   const [editableTasks, setEditableTasks] = useState<ProposedTask[]>([]);
-  const [customModelRows, setCustomModelRows] = useState<Record<number, boolean>>({});
   const [planning, setPlanning] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
@@ -115,7 +103,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         setProviders(providersData.providers);
       }
       setEditableTasks(projectData.project.proposedTasks ?? []);
-      setCustomModelRows({});
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -266,7 +253,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     .map((g) => ({ goal: g, run: latestRunFor(g.id) }))
     .filter((d): d is { goal: Goal; run: Run } => d.run?.status === "complete");
 
-  const knownModels = modelOptionGroups(providers, agents).flatMap((g) => g.options.map((o) => o.value));
+  // The orchestrator runs the project rather than working tasks in it, and a
+  // paused agent is benched — neither should be offered as an assignee.
+  const assignableAgents = agents.filter((a) => a.id !== project.orchestratorAgentId && isDispatchable(a));
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">
@@ -276,8 +265,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <h1 className="font-heading text-lg font-semibold text-foreground mb-1">
               {project.title || "Untitled brain dump"}
             </h1>
-            <Badge variant="outline" className={PROJECT_STATUS_STYLE[project.status]}>
-              {project.status}
+            <Badge variant="outline" className={PROJECT_STATUS[project.status].className}>
+              {PROJECT_STATUS[project.status].label}
             </Badge>
           </div>
           <button
@@ -352,20 +341,33 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           {project.status === "refined" && editableTasks.length > 0 && (
             <div>
-              <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <h2 className="mb-1 font-mono text-xs uppercase tracking-widest text-muted-foreground">
                 Proposed Tasks
               </h2>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Each task becomes a goal assigned to one of your existing agents. Edit anything here — nothing
+                is created until you press the button below.
+              </p>
+              <div className="grid grid-cols-1 gap-2 px-3 sm:grid-cols-[2fr_2fr_1.2fr_auto]">
+                {["Task", "What it should produce", "Assigned agent", ""].map((h) => (
+                  <span
+                    key={h}
+                    className="hidden font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70 sm:block"
+                  >
+                    {h}
+                  </span>
+                ))}
+              </div>
               <div className="flex flex-col gap-2">
                 {editableTasks.map((task, i) => {
-                  const isKnownModel = knownModels.includes(task.model);
-                  const showCustom = customModelRows[i] === true || !isKnownModel;
                   const siblingTitles = editableTasks
                     .map((t) => t.title)
                     .filter((t, idx) => idx !== i && t.trim().length > 0);
+                  const assignedAgent = assignableAgents.find((a) => a.name === task.assignee);
 
                   return (
                     <div key={i} className="flex flex-col gap-2 border border-[var(--border)] bg-card p-3">
-                      <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[2fr_2fr_1fr_auto]">
+                      <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[2fr_2fr_1.2fr_auto]">
                         <input
                           value={task.title}
                           onChange={(e) => updateTask(i, { title: e.target.value })}
@@ -376,33 +378,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                           onChange={(e) => updateTask(i, { description: e.target.value })}
                           className={TASK_INPUT_CLASS}
                         />
-                        {showCustom ? (
-                          <input
-                            value={task.model}
-                            onChange={(e) => updateTask(i, { model: e.target.value })}
-                            placeholder="e.g. ollama/llama3.1"
-                            className={`${TASK_INPUT_CLASS} font-mono`}
-                          />
-                        ) : (
-                          <select
-                            value={task.model}
-                            onChange={(e) => {
-                              if (e.target.value === CUSTOM_MODEL_VALUE) {
-                                setCustomModelRows((prev) => ({ ...prev, [i]: true }));
-                              } else {
-                                updateTask(i, { model: e.target.value });
-                              }
-                            }}
-                            className={`${TASK_INPUT_CLASS} font-mono`}
-                          >
-                            {knownModels.map((m) => (
-                              <option key={m} value={m}>
-                                {m}
-                              </option>
-                            ))}
-                            <option value={CUSTOM_MODEL_VALUE}>Custom…</option>
-                          </select>
-                        )}
+                        <select
+                          value={task.assignee ?? UNASSIGNED_VALUE}
+                          onChange={(e) =>
+                            updateTask(i, {
+                              assignee: e.target.value === UNASSIGNED_VALUE ? null : e.target.value,
+                            })
+                          }
+                          className={TASK_INPUT_CLASS}
+                        >
+                          <option value={UNASSIGNED_VALUE}>Unassigned</option>
+                          {assignableAgents.map((a) => (
+                            <option key={a.id} value={a.name}>
+                              {a.name}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           type="button"
                           onClick={() => removeTask(i)}
@@ -412,22 +403,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                         </button>
                       </div>
 
-                      {showCustom && !isKnownModel && (
+                      {assignedAgent ? (
+                        <p className="font-mono text-[10px] text-muted-foreground/70">
+                          {assignedAgent.name} runs on {assignedAgent.model}
+                        </p>
+                      ) : (
                         <p className="text-[11px] text-[var(--hud-warning)]">
-                          ⚠ &quot;{task.model || "(empty)"}&quot; doesn&apos;t match any existing agent or known
-                          provider — double-check it&apos;s real before creating an agent from it.
-                          {knownModels.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCustomModelRows((prev) => ({ ...prev, [i]: false }));
-                                updateTask(i, { model: knownModels[0] });
-                              }}
-                              className="ml-2 text-[var(--primary)] hover:underline"
-                            >
-                              Choose a known model instead
-                            </button>
-                          )}
+                          ⚠ Unassigned — this task becomes a goal with no agent. Pick one here, or assign it
+                          later from the Goals page.
                         </p>
                       )}
 
@@ -461,7 +444,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </div>
               <div className="mt-3 flex items-center gap-3">
                 <Button onClick={materializePlan} disabled={planning || editableTasks.length === 0}>
-                  {planning ? "Creating…" : "Create Agents & Goals"}
+                  {planning ? "Creating…" : `Create ${editableTasks.length} Goals`}
                 </Button>
                 {planError && <p className="text-sm text-[var(--hud-critical)]">{planError}</p>}
               </div>
