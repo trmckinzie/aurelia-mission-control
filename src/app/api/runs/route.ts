@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { mutateCollection, readCollection } from "@/lib/store";
 import { isValidId, jsonError, parseJsonBody, withLocalGuard } from "@/lib/api-helpers";
-import { buildRunPrompt, dispatchAgent } from "@/lib/runs";
-import type { Agent, Goal, Run } from "@/lib/types";
+import { buildRunPrompt, dispatchAgent, resolveUpstream } from "@/lib/runs";
+import type { Agent, Goal, Project, Run } from "@/lib/types";
 
 const COLLECTION = "runs";
 
@@ -29,27 +29,25 @@ export const POST = withLocalGuard(async (request) => {
   if (!isValidId(agentId)) return jsonError("agentId is required", 400);
   if (!isValidId(goalId)) return jsonError("goalId is required", 400);
 
-  const [agents, goals, runs] = await Promise.all([
+  const [agents, goals, runs, projects] = await Promise.all([
     readCollection<Agent>("agents"),
     readCollection<Goal>("goals"),
     readCollection<Run>(COLLECTION),
+    readCollection<Project>("projects"),
   ]);
   const agent = agents.find((a) => a.id === agentId);
   const goal = goals.find((g) => g.id === goalId);
   if (!agent) return jsonError("Agent not found", 404);
   if (!goal) return jsonError("Goal not found", 404);
 
-  // A dependency without a completed run yet is just omitted — dispatch is
-  // never blocked server-side, the org chart is what informs the user.
-  const upstream = (goal.dependsOnGoalIds ?? [])
-    .map((depId) => {
-      const depGoal = goals.find((g) => g.id === depId);
-      const depRun = runs.find((r) => r.goalId === depId && r.status === "complete");
-      return depGoal && depRun ? { title: depGoal.title, output: depRun.response } : null;
-    })
-    .filter((u): u is { title: string; output: string } => u !== null);
+  const upstream = resolveUpstream(goal, goals, runs);
 
-  const { system, user } = buildRunPrompt(agent, goal, upstream);
+  // A goal materialized from a Fleet project carries only its own task
+  // instruction — the actual source data/context lives in the project's
+  // refined brief, so it has to be looked up and passed in explicitly.
+  const projectBrief = goal.projectId ? projects.find((p) => p.id === goal.projectId)?.refinedBrief : undefined;
+
+  const { system, user } = buildRunPrompt(agent, goal, upstream, projectBrief);
   const runId = randomUUID();
   const now = new Date().toISOString();
 
